@@ -80,27 +80,72 @@ const C = {
 
 // ── DADOS ──────────────────────────────────────────────────────────────────────
 const SECTOR_MAPPING = {
-  "PROJETOS E EVENTOS":["Bruno Araujo"],
-  "FINANCEIRO/SUPRIMENTOS/JURÍDICO":["Jose Lopes","Andressa","Pablyto"],
-  "OPERAÇÃO E PROGRAMAÇÃO":["CARLOS GONZAGA SOUSA FILHO"],
-  "ENGENHARIA":["Vinicius Guimaraes","Rafael Anholetti"],
-  "MARKETING":["Carla Sobreira"],
-  "TELEJORNALISMO":["BRUNO DALVI RAMPINELLI"],
-  "ASSINATURAS":["Ronaldo Cruz"],
-  "GERÊNCIA DE RÁDIOS":["Tiago Silvares"],
-  "ENTRETENIMENTO":["Lethicia"],
-  "REDAÇÃO":["Geraldo Nascimento"],
-  "TV SUL / DIFUSORA / TV NORTE":["Maria Helena"],
+  'FINANCEIRO':                      ['Andressa'],
+  'SUPRIMENTOS':                     ['Zé Lopes'],
+  'JURÍDICO':                        ['Pablyto'],
+  'ENGENHARIA':                      ['Vinícius'],
+  'ENTRETENIMENTO':                  ['Lethícia'],
+  'GERÊNCIA DE RÁDIOS':              ['Thiago Silvares'],
+  'MARKETING':                       ['Carla Sobreira'],
+  'OPERAÇÃO E PROGRAMAÇÃO':          ['Carlos Gonzaga'],
+  'PROJETOS E EVENTOS':              ['Bruno Araújo'],
+  'REDAÇÃO':                         ['Geraldo Nascimento'],
+  'TELEJORNALISMO':                  ['Bruno Dalvi'],
+  'TV SUL':                          ['Maria Helena'],
+  'RD DIFUSORA':                     ['Maria Helena'],
+  'TV NORTE':                        ['Maria Helena'],
+  'RD CIDADÃ':                       ['Maria Helena'],
+  'RD NOROESTE':                     ['Maria Helena'],
+  'RD NOVA GERAÇÃO':                 ['Maria Helena'],
+};
+
+// Contas bancárias Banestes por setor
+var SECTOR_CONTA = {
+  'FINANCEIRO':  {conta:'31679574', nome:'Banes-CX-TVG', pool:'POOL_FINANCEIRO'},
+  'SUPRIMENTOS': {conta:'31679574', nome:'Banes-CX-TVG', pool:'POOL_FINANCEIRO'},
+  'JURÍDICO':    {conta:'31679574', nome:'Banes-CX-TVG', pool:'POOL_FINANCEIRO'},
+  'ENGENHARIA':                      {conta:'38497665', nome:'Banes-Engenharia'},
+  'ENTRETENIMENTO':                  {conta:'38497921', nome:'Banes-Entretenimento'},
+  'GERÊNCIA DE RÁDIOS':              {conta:'38497616', nome:'Banes-Ger de Rádios'},
+  'MARKETING':                       {conta:'38497897', nome:'Banes-Marketing'},
+  'OPERAÇÃO E PROGRAMAÇÃO':          {conta:'38497467', nome:'Banes-Oper e Progr'},
+  'PROJETOS E EVENTOS':              {conta:'38497269', nome:'Banes-Proj e Eventos'},
+  'REDAÇÃO':                         {conta:'38498051', nome:'Banes-Redação'},
+  'TELEJORNALISMO':                  {conta:'38495784', nome:'Banes-Telejornalismo'},
+  'TV SUL':                          {conta:'22439921', nome:'TV Sul'},
+  'RD DIFUSORA':                     {conta:'29333382', nome:'Rd Difusora'},
+  'TV NORTE':                        {conta:'22448955', nome:'TV Norte'},
+  'RD CIDADÃ':                       {conta:'29331733', nome:'Rd Cidadã'},
+  'RD NOROESTE':                     {conta:'22448963', nome:'Rd Noroeste'},
+  'RD NOVA GERAÇÃO':                 {conta:'29347184', nome:'Rd Nova Geração'},
 };
 const SECTOR_LIMITS = {
-  "PROJETOS E EVENTOS":10000,"FINANCEIRO/SUPRIMENTOS/JURÍDICO":6000,
-  "OPERAÇÃO E PROGRAMAÇÃO":4000,"ENGENHARIA":3000,"MARKETING":3000,
-  "TELEJORNALISMO":3000,"ASSINATURAS":3000,"GERÊNCIA DE RÁDIOS":3000,
-  "ENTRETENIMENTO":3000,"REDAÇÃO":3000,"TV SUL / DIFUSORA / TV NORTE":3000,
+  // Pool compartilhado R$ 6.000 — cada um pode usar tudo, soma não ultrapassa 6k
+  'FINANCEIRO':                       6000,
+  'SUPRIMENTOS':                      6000,
+  'JURÍDICO':                         6000,
+  'ENGENHARIA':                       3000,
+  'ENTRETENIMENTO':                   3000,
+  'GERÊNCIA DE RÁDIOS':               3000,
+  'MARKETING':                        3000,
+  'OPERAÇÃO E PROGRAMAÇÃO':           4000,
+  'PROJETOS E EVENTOS':              10000,
+  'REDAÇÃO':                          3000,
+  'TELEJORNALISMO':                   3000,
+  'TV SUL':                           3000,
+  'RD DIFUSORA':                      1500,
+  'TV NORTE':                         3000,
+  'RD CIDADÃ':                        1500,
+  'RD NOROESTE':                      3000,
+  'RD NOVA GERAÇÃO':                  1500,
 };
+// Contas bancárias Banestes por setor
+
+
+
 const INITIAL_USERS = [
   {login:"admin",name:"Fábio Nobre",role:"ADMIN",position:"Diretoria",email:"admin@gazeta.com",password:"nova123",hasGlobalAccess:true,allowedSectors:["TODOS"]},
-  {login:"wellington",name:"Wellington",role:"OPERADOR",position:"Coord. Engenharia",email:"wellington@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["ENGENHARIA","FINANCEIRO/SUPRIMENTOS/JURÍDICO","TELEJORNALISMO"]},
+  {login:"wellington",name:"Wellington",role:"OPERADOR",position:"Coord. Engenharia",email:"wellington@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["ENGENHARIA","FINANCEIRO","SUPRIMENTOS","JURÍDICO","TELEJORNALISMO"]},
   {login:"financeiro_1",name:"Fábio - Financeiro",role:"ADMIN",position:"Analista Financeiro",email:"fin@gazeta.com",password:"gazeta123",hasGlobalAccess:true,allowedSectors:["TODOS"],defaultCompany:"S/A A GAZETA"},
   {login:"engenharia",name:"Engenharia Vitória",role:"OPERADOR",position:"Coord. Engenharia",email:"eng@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["ENGENHARIA"]},
   {login:"telejornalismo",name:"Telejornalismo",role:"OPERADOR",position:"Redação",email:"telej@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["TELEJORNALISMO"]},
@@ -142,7 +187,7 @@ const MOCK_L = [
    local:'AMAZON WEB SERVICES',valor:3530.00,tipo:'SAÍDA',empresa:'S/A A GAZETA',
    num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
    auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
-  {id:'m6',data:'09/05/2026',setor:'FINANCEIRO/SUPRIMENTOS/JURÍDICO',portador:'Jose Lopes',
+  {id:'m6',data:'09/05/2026',setor:'SUPRIMENTOS',portador:'Zé Lopes',
    local:'PAPELARIA CENTRAL',valor:340.00,tipo:'SAÍDA',empresa:'S/A A GAZETA',
    num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
    auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
@@ -208,11 +253,22 @@ function auditaItensProibidos(texto) {
 }
 
 // Saldos bancários por setor (D26 - editável futuramente no Admin)
+// Grupos que compartilham a mesma conta/limite (apenas para visão informativa)
+var SECTOR_POOLS = {
+  'POOL_FSJ': {
+    label:   'Financeiro + Suprimentos + Jurídico',
+    limite:  6000,
+    conta:   '31679574',
+    setores: ['FINANCEIRO','SUPRIMENTOS','JURÍDICO'],
+  },
+};
+
 var SECTOR_BANK_DEFAULT = {};
 (function(){
   var keys=Object.keys(SECTOR_LIMITS);
-  for(var i=0;i<keys.length;i++) SECTOR_BANK_DEFAULT[keys[i]]={sldInicial:0,saques:0};
-  // Exemplo real: PROJETOS E EVENTOS — saques do extrato bancário
+  // Saldo inicial = o próprio limite individual (pool é controlado separadamente)
+  for(var i=0;i<keys.length;i++) SECTOR_BANK_DEFAULT[keys[i]]={sldInicial:SECTOR_LIMITS[keys[i]],saques:0};
+  // Exemplo com saques reais de PROJETOS E EVENTOS
   // Saque 1: R$ 106,49 (13/05/2026)
   // Saque 2: R$ 162,75 (13/04/2026)
   // Saque 3: R$ 372,38 (31/01/2026)
@@ -224,6 +280,11 @@ var SECTOR_BANK_DEFAULT = {};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FÓRMULA DO CAIXA (conforme folha manuscrita):
+//
+// POOLS: setores que compartilham limite (ex: Financeiro+Suprimentos+Jurídico)
+//   → Cada portador pode usar o limite total individualmente
+//   → Mas a SOMA dos gastos de todos do pool não ultrapassa o limite do pool
+//   → O dashboard mostra alerta quando o pool está estourando
 //
 //   Disponível  = Sld Inicial (D26) + Saques (utilização do cartão)
 //   Sld Final   = Disponível − PC do período  (só o que foi prestado/comprovado)
@@ -1540,6 +1601,73 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
 
   const ATS = [{k:'TODOS',l:'Todos'},{k:'VERDE',l:'✓ Auditados'},{k:'AMARELO',l:'✎ Manuais'},{k:'VERMELHO',l:'✗ Divergentes'}];
 
+  // Campos obrigatórios do formulário
+  var CAMPOS_OBRIG = {
+    setor:      'Setor',
+    empresa:    'Empresa',
+    portador:   'Portador',
+    valor:      'Valor (R$)',
+    local:      'Fornecedor / Estabelecimento',
+    cod_fornec: 'Cód. Fornecedor TOTVS',
+  };
+
+  // Valida todos os campos e retorna objeto de erros
+  function validaCampos() {
+    var erros = {};
+    Object.keys(CAMPOS_OBRIG).forEach(function(k){
+      if(!f[k]||!f[k].toString().trim()) erros[k] = CAMPOS_OBRIG[k]+' é obrigatório';
+    });
+    if(f.valor && isNaN(parseFloat(f.valor.replace(',','.')))) erros['valor'] = 'Valor inválido — use números';
+    return erros;
+  }
+
+  // Estilo dinâmico: IA (azul) > Erro (vermelho) > Normal
+  function fieldStyle(fieldKey, baseExtra) {
+    var isAi  = aiFields.has(fieldKey);
+    var hasErr = submitted && fieldErrors[fieldKey];
+    var locked = isAi && AI_LOCK;
+    var borderColor = hasErr ? C.red : isAi ? C.blue : C.border;
+    var bgColor     = hasErr ? C.red+'0d' : isAi ? C.blue+'0d' : C.bg3;
+    return Object.assign({
+      width:'100%',
+      background: bgColor,
+      border: '1px solid ' + borderColor,
+      borderRadius: 7,
+      padding: '8px 10px',
+      color: locked ? C.text2 : C.text0,
+      fontSize: 13,
+      cursor: locked ? 'not-allowed' : 'text',
+      outline: (isAi||hasErr) ? '1px solid '+borderColor+'44' : 'none',
+      outlineOffset: '1px',
+      transition: 'border-color .2s, background .2s',
+    }, baseExtra||{});
+  }
+
+  // Mantém aiStyle como alias para compatibilidade
+  function aiStyle(fieldKey, baseExtra) { return fieldStyle(fieldKey, baseExtra); }
+
+  // Hint dinâmico do campo
+  function fieldHint(fieldKey) {
+    if(submitted && fieldErrors[fieldKey]) return '⚠ '+fieldErrors[fieldKey];
+    if(aiFields.has(fieldKey)) return AI_LOCK ? '🔒 Preenchido pela IA — somente leitura' : '🤖 Preenchido pela IA/OCR';
+    return null;
+  }
+  function fieldHintColor(fieldKey) {
+    if(submitted && fieldErrors[fieldKey]) return C.red;
+    if(aiFields.has(fieldKey)) return C.blue;
+    return undefined;
+  }
+
+  function aiProps(fieldKey) {
+    return {
+      readOnly: aiFields.has(fieldKey) && AI_LOCK,
+      disabled: aiFields.has(fieldKey) && AI_LOCK,
+      title: aiFields.has(fieldKey)
+        ? (AI_LOCK ? '🔒 Preenchido pela IA — somente leitura' : '🤖 Preenchido pela IA/OCR')
+        : '',
+    };
+  }
+
   return e('div',{className:'au'},
     e(Modal,{open:!!scanItem,onClose:()=>setScanItem(null),
       title:'📷 Documento Fiscal — '+((scanItemAtual&&scanItemAtual.local)||''),width:800},
@@ -1661,6 +1789,108 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
       )
     ),
     // Tabela aportes
+    // ── PAINEL DE SALDO COMPARTILHADO (pools) ──────────────────────────────
+    Object.keys(SECTOR_POOLS).map(function(poolKey){
+      var pool = SECTOR_POOLS[poolKey];
+      // Só mostra se o filtro atual inclui ao menos um setor do pool
+      var poolVisivel = fS===''
+        ? true  // "Todos os setores" — não mostra (muito genérico)
+        : pool.setores.indexOf(fS) > -1; // mostra só se filtrar por um dos 3
+      if(!poolVisivel) return null;
+      // Soma TUDO que os setores do pool gastaram (saídas)
+      var poolLanc = fL.filter(function(l){
+        return pool.setores.indexOf(l.setor) > -1 && l.tipo==='SAÍDA';
+      });
+      var totalGasto = poolLanc.reduce(function(s,l){return s+l.valor;},0);
+      var saldoPool  = pool.limite - totalGasto;
+      var pct        = Math.min(100, Math.round((totalGasto/pool.limite)*100));
+      var corBarra   = pct>=90?C.red:pct>=70?C.amber:C.green;
+      var corSaldo   = saldoPool<=0?C.red:saldoPool<pool.limite*0.3?C.amber:C.green;
+
+      // Detalhes por setor dentro do pool
+      var detalhe = pool.setores.map(function(s){
+        var gasto = fL.filter(function(l){return l.setor===s&&l.tipo==='SAÍDA';})
+                      .reduce(function(sm,l){return sm+l.valor;},0);
+        return {setor:s, gasto:gasto};
+      });
+
+      return e('div',{key:poolKey,style:{
+        background:C.bg1,
+        border:'1px solid '+C.blue+'55',
+        borderLeft:'3px solid '+C.blue,
+        borderRadius:12,padding:'16px 20px',marginBottom:16}},
+
+        // Cabeçalho
+        e('div',{style:{display:'flex',alignItems:'center',gap:12,marginBottom:14,flexWrap:'wrap'}},
+          e('div',{style:{flex:1}},
+            e('div',{style:{fontSize:13,fontWeight:700,color:C.text0}},
+              '🔗 Conta compartilhada — '+pool.label),
+            e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},
+              'Conta '+pool.conta+' · Limite total: R$ '+fmt(pool.limite)+
+              ' · Qualquer setor pode usar o total disponível')
+          ),
+          // Saldo disponível em destaque
+          e('div',{style:{textAlign:'right',flexShrink:0}},
+            e('div',{style:{fontSize:11,color:C.text2,marginBottom:2}},'Saldo disponível na conta'),
+            e('div',{style:{fontSize:24,fontWeight:700,color:corSaldo,fontFamily:C.mono}},
+              'R$ '+fmt(saldoPool))
+          )
+        ),
+
+        // Barra de progresso geral
+        e('div',{style:{marginBottom:14}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+            e('span',{style:{fontSize:11,color:C.text2}},'Total utilizado: R$ '+fmt(totalGasto)),
+            e('span',{style:{fontSize:11,fontWeight:700,color:corBarra}},pct+'%')
+          ),
+          e('div',{style:{height:8,background:C.bg3,borderRadius:4,overflow:'hidden'}},
+            e('div',{style:{
+              width:pct+'%',height:'100%',borderRadius:4,
+              background:'linear-gradient(90deg,'+C.green+','+corBarra+')',
+              transition:'width .4s'}})
+          )
+        ),
+
+        // Detalhamento por setor
+        e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}},
+          detalhe.map(function(d){
+            var portador = (SECTOR_MAPPING[d.setor]||['—'])[0];
+            var saldoInd = pool.limite - totalGasto; // saldo real = pool - tudo gasto
+            var pctInd   = pool.limite>0?Math.min(100,Math.round((d.gasto/pool.limite)*100)):0;
+            return e('div',{key:d.setor,style:{
+              background:C.bg2,border:'1px solid '+C.border,
+              borderRadius:9,padding:'12px 14px'}},
+              e('div',{style:{fontSize:11,fontWeight:700,color:C.text0,marginBottom:2}},d.setor),
+              e('div',{style:{fontSize:10,color:C.text2,marginBottom:8}},portador),
+              e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},
+                e('div',null,
+                  e('div',{style:{fontSize:9,color:C.text2}},'Gastou'),
+                  e('div',{style:{fontSize:14,fontWeight:700,color:d.gasto>0?C.red:C.text2,fontFamily:C.mono}},
+                    'R$ '+fmt(d.gasto))
+                ),
+                e('div',{style:{textAlign:'right'}},
+                  e('div',{style:{fontSize:9,color:C.text2}},'Saldo restante*'),
+                  e('div',{style:{fontSize:14,fontWeight:700,color:corSaldo,fontFamily:C.mono}},
+                    'R$ '+fmt(saldoInd))
+                )
+              ),
+              // Mini barra individual
+              e('div',{style:{height:4,background:C.bg3,borderRadius:2,overflow:'hidden'}},
+                e('div',{style:{width:pctInd+'%',height:'100%',borderRadius:2,
+                  background:pctInd>=90?C.red:pctInd>=70?C.amber:C.green}})
+              ),
+              d.gasto>0&&e('div',{style:{fontSize:9,color:C.text2,marginTop:4}},
+                pctInd+'% do limite usado por este setor')
+            );
+          })
+        ),
+        e('div',{style:{fontSize:10,color:C.text2,marginTop:10,borderTop:'1px solid '+C.border,paddingTop:8}},
+          '* Saldo disponível = R$ '+fmt(pool.limite)+' (limite) − R$ '+fmt(totalGasto)+
+          ' (total gasto pelos 3 setores) = R$ '+fmt(saldoPool)+
+          ' — disponível para qualquer um dos 3 setores usar')
+      );
+    }),
+
     e(Card,{style:{marginBottom:16}},
       e(CardHdr,{title:'Resumo consolidado',icon:'📈'}),
       e('div',{style:{overflowX:'auto'}},
@@ -1839,6 +2069,14 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast}) {
   const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''});
   const [fu,setFu] = useState(null);
   const [load,setLoad] = useState(false);
+  // Campos preenchidos pela IA/OCR — borda azul + bloqueio
+  const [aiFields,setAiFields] = useState(new Set());
+  // REGRA: quando ONLINE (GitHub Pages), campos IA são somente leitura
+  // Para ativar após publicar: const AI_LOCK = true;
+  const AI_LOCK = false; // muda para true após publicar no GitHub Pages
+  // Validação visual — campos com erro ficam com borda vermelha
+  const [submitted,setSubmitted] = useState(false); // true após clicar em salvar
+  const [fieldErrors,setFieldErrors] = useState({});
   const [af,setAf] = useState(new Set());
   const fRef = useRef();
   const upd = (k,v)=>setF(p=>({...p,[k]:v}));
@@ -2389,13 +2627,38 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
   const [fS,setFS] = useState('');
   const [fSt,setFSt] = useState('');
   const [fT,setFT] = useState('');
+  const [fPeriodo,setFPeriodo] = useState('todos');
+  const [fDtIni,setFDtIni] = useState('');
+  const [fDtFim,setFDtFim] = useState('');
   const [vUrl,setVUrl] = useState(null);
   const allSec = user.hasGlobalAccess?Object.keys(sMap):user.allowedSectors.filter(s=>s!=='TODOS');
-  const fil = useMemo(()=>lanc.filter(l=>{
+
+  function parseBR(s){if(!s)return null;var p=s.split('/');return p.length===3?new Date(+p[2],+p[1]-1,+p[0]):null;}
+  function periodoRange(p){var now=new Date();
+    if(p==='mes_atual')return{ini:new Date(now.getFullYear(),now.getMonth(),1),fim:new Date(now.getFullYear(),now.getMonth()+1,0)};
+    if(p==='mes_anterior')return{ini:new Date(now.getFullYear(),now.getMonth()-1,1),fim:new Date(now.getFullYear(),now.getMonth(),0)};
+    if(p==='ultimos_30'){var i30=new Date(now);i30.setDate(i30.getDate()-30);return{ini:i30,fim:now};}
+    if(p==='ultimos_90'){var i90=new Date(now);i90.setDate(i90.getDate()-90);return{ini:i90,fim:now};}
+    return null;
+  }
+
+  const fil = useMemo(()=>lanc.filter(function(l){
     if(!hasAcc(user,l.setor))return false;
     if(fS&&l.setor!==fS)return false;
     if(fSt&&l.auditStatus!==fSt)return false;
     if(fT&&l.tipo!==fT)return false;
+    if(srch){var q2=srch.toLowerCase();
+      if(!(l.local&&l.local.toLowerCase().includes(q2)||
+           l.portador&&l.portador.toLowerCase().includes(q2)||
+           l.num_nf&&l.num_nf.includes(q2)))return false;}
+    var dt2=parseBRdb(l.data);
+    if(fPeriodo&&fPeriodo!=='todos'&&fPeriodo!=='personalizado'){
+      var r2=periodoRangeDb(fPeriodo);
+      if(r2&&dt2&&(dt2<r2.ini||dt2>r2.fim))return false;
+    } else if(fPeriodo==='personalizado'){
+      if(dtIniAtivo&&dt2&&dt2<new Date(dtIniAtivo+'T00:00:00'))return false;
+      if(dtFimAtivo&&dt2&&dt2>new Date(dtFimAtivo+'T23:59:59'))return false;
+    }
     if(srch){const q=srch.toLowerCase();if(!(l.local?.toLowerCase().includes(q)||l.num_nf?.includes(q)||l.portador?.toLowerCase().includes(q)||l.cod_fornec?.includes(q)))return false;}
     return true;
   }).sort((a,b)=>b.data.split('/').reverse().join('').localeCompare(a.data.split('/').reverse().join(''))),[lanc,fS,fSt,fT,srch,user]);
@@ -2415,8 +2678,77 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
       )
     ),
     e(Card,null,
+      // ── Filtro de período ──────────────────────────────────────────────────
+      e('div',{style:{background:C.bg1,border:'1px solid '+C.border,
+        borderRadius:10,padding:'12px 16px',marginBottom:10}},
+        // Linha 1: botões rápidos
+        e('div',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+          e('span',{style:{fontSize:11,fontWeight:700,color:C.text2,whiteSpace:'nowrap'}},'📅 Período:'),
+          ['todos','mes_atual','mes_anterior','ultimos_30','ultimos_90'].map(function(p){
+            var labels={todos:'Todos',mes_atual:'Mês atual',mes_anterior:'Mês anterior',
+              ultimos_30:'30 dias',ultimos_90:'90 dias'};
+            var active = fPeriodo===p;
+            return e('button',{key:p,
+              onClick:function(){
+                setFPeriodo(p);
+                setFDtIni(''); setFDtFim('');
+                // Aplica imediatamente
+                setFiltroAplicado(function(prev){
+                  return Object.assign({},prev,{periodo:p,dtIni:'',dtFim:''});
+                });
+              },
+              style:{padding:'5px 14px',borderRadius:20,fontSize:11,cursor:'pointer',
+                fontWeight:active?700:400,whiteSpace:'nowrap',
+                background:active?C.blue:'transparent',
+                border:'1px solid '+(active?C.blue:C.border),
+                color:active?'#fff':C.text2}},
+              labels[p]);
+          }),
+          e('button',{
+            onClick:function(){setFPeriodo('personalizado');},
+            style:{padding:'5px 14px',borderRadius:20,fontSize:11,cursor:'pointer',
+              fontWeight:fPeriodo==='personalizado'?700:400,whiteSpace:'nowrap',
+              background:fPeriodo==='personalizado'?C.blue:'transparent',
+              border:'1px solid '+(fPeriodo==='personalizado'?C.blue:C.border),
+              color:fPeriodo==='personalizado'?'#fff':C.text2}},
+            '📅 Personalizado')
+        ),
+        // Linha 2: datas + botões (só no personalizado)
+        fPeriodo==='personalizado'&&e('div',{style:{
+          display:'flex',alignItems:'center',gap:8,
+          flexWrap:'wrap',marginTop:10}},
+          e('span',{style:{fontSize:11,color:C.text2,whiteSpace:'nowrap'}},'De'),
+          e('input',{type:'date',value:fDtIni,
+            onChange:function(ev){setFDtIni(ev.target.value);},
+            style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:7,
+              padding:'7px 10px',color:C.text0,fontSize:12}}),
+          e('span',{style:{fontSize:11,color:C.text2,whiteSpace:'nowrap'}},'até'),
+          e('input',{type:'date',value:fDtFim,
+            onChange:function(ev){setFDtFim(ev.target.value);},
+            style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:7,
+              padding:'7px 10px',color:C.text0,fontSize:12}}),
+          // Botões colados às datas
+          e('button',{
+            onClick:limparFiltro,
+            style:{padding:'7px 14px',borderRadius:7,fontSize:12,
+              cursor:'pointer',fontWeight:500,whiteSpace:'nowrap',
+              background:'transparent',border:'1px solid '+C.border,color:C.text2}},
+            '✕ Limpar'),
+          e('button',{
+            onClick:aplicarFiltro,
+            style:{padding:'7px 18px',borderRadius:7,fontSize:12,
+              cursor:'pointer',fontWeight:700,whiteSpace:'nowrap',
+              background:C.blue,border:'none',color:'#fff',
+              boxShadow:'0 2px 8px '+C.blue+'55'}},
+            '✔ Aplicar')
+        )
+      ),
       e(FBar,null,
-        e('input',{value:srch,onChange:ev=>setSrch(ev.target.value),placeholder:'🔍 Buscar por nome, NF, portador...',style:{flex:1,minWidth:180,background:C.bg1,border:`1px solid ${C.border}`,borderRadius:6,padding:'6px 10px',color:C.text0,fontSize:12}}),
+        e('input',{value:srch,onChange:function(ev){setSrch(ev.target.value);},
+          placeholder:'🔍 Buscar por nome, NF, portador...',
+          style:{flex:1,minWidth:180,background:C.bg1,
+            border:'1px solid '+C.border,borderRadius:6,
+            padding:'6px 10px',color:C.text0,fontSize:12}}),
         e(FSel,{value:fS,onChange:setFS,options:allSec,ph:'Todos os setores'}),
         e(FSel,{value:fT,onChange:setFT,options:[{value:'SAÍDA',label:'Saídas'},{value:'ENTRADA',label:'Entradas'}],ph:'Tipo'}),
         e(FSel,{value:fSt,onChange:setFSt,options:[{value:'conciliado',label:'Conciliado'},{value:'auditado',label:'Auditado'},{value:'divergente',label:'Divergente'},{value:'aguardando_doc_fiscal',label:'Ag. doc.'}],ph:'Status'}),
