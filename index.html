@@ -776,7 +776,6 @@ function MobNav(props){
   var allItems=[
     {id:'apresentacao',icon:'📘',label:'Manual'},
     {id:'lancamento',  icon:'➕',label:'Lançar'},
-    {id:'captura',     icon:'📷',label:'Captura'},
     {id:'dashboard',   icon:'📊',label:'Resumo'},
     {id:'inbox',       icon:'📥',label:'Entrada',badge:bc},
     {id:'aportes',     icon:'💼',label:'Aportes',adm:true},
@@ -2854,7 +2853,7 @@ function TabImport({onBatchAdd,sMap,toast}) {
 }
 
 // ── INBOX ──────────────────────────────────────────────────────────────────────
-function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
+function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
   const [sel,setSel] = useState(null);
   const [f,setF] = useState({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',
     cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
@@ -3034,7 +3033,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
         e('span',{style:{fontSize:14,fontWeight:600,color:C.text0}},vis.length+' documento(s) aguardando conferência'),
         e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},'Clique em um documento para conferir e registrar')
       ),
-      e('div',null,
+      !isMobile && e('div',null,
         e('input',{type:'file',ref:capRef,accept:'image/*',capture:'environment',onChange:newCap,style:{display:'none'}}),
         e(Btn,{variant:'primary',onClick:()=>capRef.current&&capRef.current.click()},'📸 Captura de campo')
       )
@@ -4240,9 +4239,18 @@ function App() {
   }
 
   function addQueue(item){
+    // Firestore tem limite de 1MB — remover base64 grande da foto antes de salvar
     var fbItem = Object.assign({},item,{_ts: Date.now()});
-    salvarQueue(fbItem);
-    setQueue(function(p){return[fbItem,...p];});
+    var fbItemSafe = Object.assign({},fbItem);
+    // Se a imagem for base64 muito grande, salvar referência pequena
+    if(fbItemSafe.image && fbItemSafe.image.length > 500000) {
+      fbItemSafe.image = fbItemSafe.image.substring(0,500000); // trunca em 500KB
+    }
+    if(fbItemSafe.documento_fiscal_url && fbItemSafe.documento_fiscal_url.length > 500000) {
+      fbItemSafe.documento_fiscal_url = fbItemSafe.documento_fiscal_url.substring(0,500000);
+    }
+    salvarQueue(fbItemSafe);
+    setQueue(function(p){return[fbItem,...p];}); // local mantém a foto completa
   }
 
   if(!user) return e(React.Fragment,null,e(Toasts,{toasts,dismiss}),e(LoginScreen,{onLogin:u=>{setUser(u);setTab('dashboard');}}));
@@ -4257,6 +4265,8 @@ function App() {
     // Mobile: OCR Capture
     isMobile&&showCapture&&e(MobileCapture,{user:user,sMap:sMap,
       onAdd:function(item){
+        // Debug
+        console.log('Mobile onAdd recebeu:', item.id, 'valor:', item.valor, 'local:', item.local, 'temFoto:', !!item.documento_fiscal_url);
         // Lançamento do celular vai para Caixa de entrada para conferência
         var queueItem={
           id:       item.id||uid(),
@@ -4322,7 +4332,7 @@ function App() {
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='import'&&e(TabImport,{onBatchAdd:items=>setLanc(p=>[...items,...p]),sMap,toast}),
-        tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast}),
+        tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
         tab==='aportes'&&e(TabAportes,{lanc,aportes,user,onClosePeriod:()=>{setLanc([]);toast.success('✅ Período encerrado!');},onReset:()=>setConfReset(true),toast}),
         tab==='movimentacao'&&e(TabMovimentacao,{lanc,user,sMap,toast}),
