@@ -17,6 +17,7 @@ body{font-family:'Sora',sans-serif;background:#080e1c;color:#f0f4ff;font-size:13
 ::-webkit-scrollbar-thumb{background:#1e2d47;border-radius:3px}
 input,select,textarea,button{font-family:inherit;font-size:13px}
 input[type=checkbox]{accent-color:#3b82f6;width:14px;height:14px;cursor:pointer}
+.uppercase-select option{text-transform:uppercase}
 table{border-collapse:collapse;width:100%}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -371,6 +372,14 @@ var AI_LOCK = true;  // campos OCR/IA são somente leitura (GitHub Pages)
 
 const uid = () => Math.random().toString(36).slice(2,9)+'-'+Date.now();
 const fmt = n => (n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const upper = s => s ? String(s).toUpperCase() : '';
+const fmtDate = s => {
+  // Formata enquanto digita: XX/XX/XXXX
+  var d = s.replace(/\D/g,'').substring(0,8);
+  if(d.length>4) return d.substring(0,2)+'/'+d.substring(2,4)+'/'+d.substring(4);
+  if(d.length>2) return d.substring(0,2)+'/'+d.substring(2);
+  return d;
+};
 const fmtDt = iso => new Date(iso).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const todayISO = () => new Date().toISOString().split('T')[0];
 const isoToBR = iso => { if(!iso) return ''; const [y,m,d]=iso.split('-'); return d+'/'+m+'/'+y; };
@@ -604,9 +613,15 @@ function Fld({label,required,children,span}) {
   );
 }
 
-function TI({value,onChange,type='text',placeholder,disabled,hi,mono,style:sty={}}) {
-  return e('input',{type,value,onChange:ev=>onChange(ev.target.value),placeholder,disabled,
-    style:{background:C.bg2,border:'1px solid '+hi?C.blue:C.border,borderRadius:6,padding:'8px 10px',color:C.text0,width:'100%',fontFamily:mono?C.mono:'inherit',fontSize:12,...sty}});
+function TI({value,onChange,type='text',placeholder,disabled,hi,mono,uppercase,dateFormat,style:sty={}}) {
+  function handleChange(ev) {
+    var v = ev.target.value;
+    if(uppercase) v = v.toUpperCase();
+    if(dateFormat) v = fmtDate(v);
+    onChange(v);
+  }
+  return e('input',{type,value,onChange:handleChange,placeholder,disabled,
+    style:{background:C.bg2,border:'1px solid '+(hi?C.blue:C.border),borderRadius:6,padding:'8px 10px',color:C.text0,width:'100%',fontFamily:mono?C.mono:'inherit',fontSize:12,textTransform:uppercase?'uppercase':'none',...sty}});
 }
 
 function SI({value,onChange,options,disabled,style:sty={}}) {
@@ -710,7 +725,7 @@ function MobNav(props){
     {id:'lancamento',  icon:'➕',label:'Lançar'},
     {id:'captura',     icon:'📷',label:'Captura'},
     {id:'dashboard',   icon:'📊',label:'Resumo'},
-    {id:'inbox',       icon:'📥',label:'Entrada',badge:bc,adm:true},
+    {id:'inbox',       icon:'📥',label:'Entrada',badge:bc},
     {id:'aportes',     icon:'💼',label:'Aportes',adm:true},
     {id:'admin',       icon:'⚙️',label:'Admin',  adm:true},
   ];
@@ -822,7 +837,7 @@ function MobLancList(props){
           e('div',{style:{fontSize:13,fontWeight:600,color:'#f0f4ff',
             overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.local),
           e('div',{style:{fontSize:11,color:'#4d6080',marginTop:2}},
-            item.portador+' · '+item.data)
+            upper(item.portador)+' · '+item.data)
         ),
         e('div',{style:{textAlign:'right',flexShrink:0}},
           e('div',{style:{fontSize:14,fontWeight:700,
@@ -1115,7 +1130,7 @@ function MobileCapture(props){
               placeholder:'Ex: 497488',inputMode:'numeric',style:inputSt('num_nf')})
           ),
           fld('data','📅 Data *',
-            e('input',{value:fields.data,onChange:function(ev){var v=ev.target.value;setFields(function(p){return Object.assign({},p,{data:v});});},
+            e('input',{value:fields.data,onChange:function(ev){var v=fmtDate(ev.target.value);setFields(function(p){return Object.assign({},p,{data:v});});},
               placeholder:'DD/MM/AAAA',style:inputSt('data')})
           )
         ),
@@ -1369,7 +1384,7 @@ function TabCaptura({user, sMap, companies, onAdd, toast}) {
             )
           ),
           e(Fld,{label:'Estabelecimento / Fornecedor'},
-            e(TI,{value:f.local,onChange:function(v){upd('local',v);},ph:'Nome do estabelecimento'})
+            e(TI,{value:f.local,onChange:function(v){upd('local',v.toUpperCase());},ph:'Nome do estabelecimento',uppercase:true})
           ),
           e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
             e(Fld,{label:'Valor (R$) *',req:true},
@@ -1464,7 +1479,7 @@ function LoginScreen({onLogin}) {
 }
 
 // ── SIDEBAR ────────────────────────────────────────────────────────────────────
-var TABS_OPERADOR=["apresentacao","lancamento","captura","dashboard"];
+var TABS_OPERADOR=["apresentacao","lancamento","captura","dashboard","inbox"];
 var TABS_ADMIN=["apresentacao","lancamento","captura","dashboard","inbox","database","aportes","movimentacao","import","envios","admin"];
 function hasTabAccess(user,tabId){if(!user)return false;if(user.role==="ADMIN"||user.hasGlobalAccess)return true;var tabs=user.allowedTabs||TABS_OPERADOR;return tabs.indexOf(tabId)>-1;}
 
@@ -2860,13 +2875,13 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
               letterSpacing:'.07em',marginBottom:10}},'📋 Dados lidos pela IA — confira e corrija se necessário'),
             e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
               e(Fld,{label:'Fornecedor / Estabelecimento *'},
-                e(TI,{value:f.local,onChange:v=>upd('local',v),placeholder:'Nome do fornecedor'})
+                e(TI,{value:f.local,onChange:v=>upd('local',v),placeholder:'Nome do fornecedor',uppercase:true})
               ),
               e(Fld,{label:'Valor (R$) *'},
                 e(TI,{value:f.valor,onChange:v=>upd('valor',v),placeholder:'0,00',mono:true})
               ),
               e(Fld,{label:'Data'},
-                e(TI,{value:f.data,onChange:v=>upd('data',v),placeholder:'DD/MM/AAAA'})
+                e(TI,{value:f.data,onChange:v=>upd('data',v),placeholder:'DD/MM/AAAA',dateFormat:true})
               ),
               e(Fld,{label:'Nº Nota Fiscal'},
                 e(TI,{value:f.num_nf,onChange:v=>upd('num_nf',v),placeholder:'Número da NF',mono:true})
