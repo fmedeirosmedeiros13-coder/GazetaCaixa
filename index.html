@@ -1516,7 +1516,7 @@ function ScannerModal(props) {
         };
         xhr.onerror=function(){usaTesseract();};
         xhr.send(JSON.stringify({contents:[{parts:[
-          {text:"Analise esta nota fiscal/cupom/DANFE. Extraia EXATAMENTE no formato abaixo:\nVALOR: [valor total pago, ex: 162,75]\nDATA: [data emissão DD/MM/AAAA]\nFORNECEDOR: [razão social da EMPRESA EMITENTE - ignore texto como SAQUE CARTÃO, procure o nome da loja/empresa que emitiu o documento, ex: POSTO SHELL LTDA, SUPERMERCADO X]\nCNPJ: [CNPJ da empresa emitente, só números]\nNF: [número da nota ou cupom fiscal]\nPROIBIDOS: [NENHUM, ou liste: cerveja/vinho/whisky/cigarro se encontrar]\nResponda SOMENTE essas 6 linhas."},
+          {text:"Analise este documento fiscal. Pode ser nota fiscal, cupom fiscal, DANFE ou comprovante de cartão. Retorne EXATAMENTE neste formato:\nVALOR: [somente o valor total em reais, ex: 162,75]\nDATA: [data DD/MM/AAAA]\nFORNECEDOR: [se for NF ou cupom fiscal: razão social da empresa emitente. Se for comprovante de cartão/saque: nome do estabelecimento onde foi usado, ex: SUPERMERCADO BOM PRECO, POSTO SHELL. Se não identificar: NÃO IDENTIFICADO]\nCNPJ: [CNPJ só números, ou NAO IDENTIFICADO]\nNF: [número do documento, ou NAO IDENTIFICADO]\nPROIBIDOS: [NENHUM, ou liste itens: cerveja/vinho/whisky/cigarro/fumo se encontrar na lista de produtos]\nResponda SOMENTE essas 6 linhas, sem explicações."},
           {inline_data:{mime_type:"image/jpeg",data:r.result.split(',')[1]}}
         ]}]}));
       } else {
