@@ -223,7 +223,7 @@ var FIREBASE_CONFIG = {
   messagingSenderId: "COLE_SEU_MESSAGING_SENDER_ID_AQUI",
   appId:             "COLE_SEU_APP_ID_AQUI",
 };
-var GEMINI_API_KEY = "AIzaSyDJcJG4XvhY0AdoIEJgeSw1c_xIJI8rbSQ";
+var GEMINI_API_KEY = ""; // OCR via Cloudflare Worker — chave segura no servidor
 var FIREBASE_OK = false; // muda para true após configurar
 
 function salvarLancamento(item) {
@@ -721,7 +721,7 @@ function useIsMobile(){
 function MobNav(props){
   var tab=props.tab; var setTab=props.setTab; var bc=props.bc; var isAdmin=props.isAdmin;
   var allItems=[
-    {id:'apresentacao',icon:'🏠',label:'Início'},
+    {id:'apresentacao',icon:'📘',label:'Manual'},
     {id:'lancamento',  icon:'➕',label:'Lançar'},
     {id:'captura',     icon:'📷',label:'Captura'},
     {id:'dashboard',   icon:'📊',label:'Resumo'},
@@ -1479,12 +1479,12 @@ function LoginScreen({onLogin}) {
 }
 
 // ── SIDEBAR ────────────────────────────────────────────────────────────────────
-var TABS_OPERADOR=["apresentacao","lancamento","captura","dashboard","inbox","manual"];
-var TABS_ADMIN=["apresentacao","lancamento","captura","dashboard","inbox","database","aportes","movimentacao","import","envios","admin","manual"];
+var TABS_OPERADOR=["apresentacao","lancamento","captura","dashboard","inbox"];
+var TABS_ADMIN=["apresentacao","lancamento","captura","dashboard","inbox","database","aportes","movimentacao","import","envios","admin"];
 function hasTabAccess(user,tabId){if(!user)return false;if(user.role==="ADMIN"||user.hasGlobalAccess)return true;var tabs=user.allowedTabs||TABS_OPERADOR;return tabs.indexOf(tabId)>-1;}
 
 const NAV = [
-  {id:'apresentacao',l:'Início',i:'🏠'},
+  {id:'apresentacao',l:'Manual do sistema',i:'📘'},
   {id:'lancamento',l:'Lançamento manual',i:'➕',accent:true},
   {id:'captura',l:'Captura de NF',i:'📷'},
   {id:'dashboard',l:'Consolidado geral',i:'📊'},
@@ -1495,7 +1495,6 @@ const NAV = [
   {id:'import',l:'Importar extrato',i:'📤',adm:true},
   {id:'envios',l:'Gestão de envios',i:'📧',adm:true},
   {id:'admin',l:'Painel admin',i:'⚙️',adm:true},
-  {id:'manual',l:'Manual do sistema',i:'📖'},
 ];
 
 function Sidebar({tab,setTab,user,onLogout,bc}) {
@@ -2783,13 +2782,12 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
     setSel(doc);
     setFu(doc.image||doc.documento_fiscal_url||null);
     setF({
-      num_nf:   doc.num_nf  ||doc.aiMetadata?.num_nf   ||'',
-      valor:    doc.valor   ?String(doc.valor)          :doc.aiMetadata?.valor||'',
-      local:    doc.local   ||doc.aiMetadata?.fornecedor||'',
-      data:     doc.data    ||new Date().toLocaleDateString('pt-BR'),
-      portador: doc.portador||'',
-      empresa:  doc.empresa ||'S/A A GAZETA',
-      // Campos TOTVS — sempre vazios, preenchidos aqui pelo supervisor
+      num_nf:   doc.num_nf   ||'',
+      valor:    doc.valor    ?String(doc.valor).replace('.',','):'',
+      local:    (doc.local   ||doc.descricao||'').toUpperCase(),
+      data:     doc.data     ||new Date().toLocaleDateString('pt-BR'),
+      portador: doc.portador ||'',
+      empresa:  doc.empresa  ||'S/A A GAZETA',
       cod_fornec:'', id_datasul:'', centro_custo:'',
       conta_contabil:'', num_ordem:'', num_requisicao:''
     });
@@ -3490,7 +3488,7 @@ function SectForm({data,onSave,onCancel}) {
 }
 
 // ── APP ROOT ───────────────────────────────────────────────────────────────────
-const TITLES = {apresentacao:'Início',captura:'Captura de NF',dashboard:'Consolidado geral',lancamento:'Lançamento manual',inbox:'Caixa de entrada',database:'Banco de dados',aportes:'Controle de aportes',movimentacao:'Movimentação por setor',import:'Importar extrato',envios:'Gestão de envios',admin:'Painel administrativo',manual:'Manual do Sistema'};
+const TITLES = {apresentacao:'Manual do Sistema',captura:'Captura de NF',dashboard:'Consolidado geral',lancamento:'Lançamento manual',inbox:'Caixa de entrada',database:'Banco de dados',aportes:'Controle de aportes',movimentacao:'Movimentação por setor',import:'Importar extrato',envios:'Gestão de envios',admin:'Painel administrativo',};
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4003,7 +4001,32 @@ function TabManual({user}) {
     return e('div',null,e('p',{style:mS.body},'Seção em desenvolvimento.'));
   }
 
-  return e('div',{style:{display:'flex',gap:0,minHeight:'70vh'}},
+  function imprimirManual() {
+    window.print();
+  }
+
+  return e('div',{style:{display:'flex',flexDirection:'column',gap:0,minHeight:'70vh'}},
+    // Header do manual com botão imprimir
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',
+      padding:'12px 0 16px',marginBottom:4,borderBottom:'1px solid '+C.border}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:10}},
+        e('span',{style:{fontSize:26}},'📘'),
+        e('div',null,
+          e('div',{style:{fontSize:16,fontWeight:700,color:C.text0}},'Manual do Sistema'),
+          e('div',{style:{fontSize:11,color:C.text2,marginTop:1}},
+            isA ? 'Manual do Usuário + Administrador · v8.0' : 'Manual do Usuário · v8.0'
+          )
+        )
+      ),
+      e('button',{
+        onClick:imprimirManual,
+        style:{display:'flex',alignItems:'center',gap:8,padding:'8px 16px',
+          background:'#1a2a4a',border:'1px solid '+C.blue+'55',borderRadius:8,
+          color:C.blueHi,fontSize:12,fontWeight:600,cursor:'pointer',
+          transition:'all .15s'}
+      }, '🖨️ Imprimir / Salvar PDF')
+    ),
+    e('div',{style:{display:'flex',gap:0,flex:1}},
     // Menu lateral do manual
     e('div',{style:{width:220,flexShrink:0,borderRight:'1px solid '+C.border,paddingRight:0,marginRight:0}},
       e('div',{style:{padding:'10px 12px 6px',fontSize:9,fontWeight:700,color:C.text2,textTransform:'uppercase',letterSpacing:'.1em'}},'Manual do Usuário'),
@@ -4039,7 +4062,8 @@ function TabManual({user}) {
         renderSec()
       )
     )
-  );
+    ) // fecha flex row inner
+  ); // fecha flex col outer
 }
 
 function App() {
@@ -4082,19 +4106,36 @@ function App() {
     isMobile&&showCapture&&e(MobileCapture,{user:user,sMap:sMap,
       onAdd:function(item){
         // Lançamento do celular vai para Caixa de entrada para conferência
-        var queueItem=Object.assign({},item,{
-          status:'pendente',
-          capturedBy:item.operador_nome||user.name,
-          timestamp:new Date().toISOString(),
-          aiAlerts:[],
-          irregularidade:false,
-          isAuditing:false,
-          image:item.documento_fiscal_url||null,
-          descricao:item.local||'Captura mobile',
-        });
+        var queueItem={
+          id:       item.id||uid(),
+          setor:    item.setor||'',
+          portador: item.portador||'',
+          descricao:item.local||(item.fornecedor)||'Captura mobile',
+          status:   'pendente',
+          capturedBy: item.operador_nome||user.name,
+          timestamp:  new Date().toISOString(),
+          aiAlerts:   [],
+          irregularidade: false,
+          isAuditing: false,
+          // Dados preenchidos pela IA — usados na conferência
+          image:    item.documento_fiscal_url||null,
+          documento_fiscal_url: item.documento_fiscal_url||null,
+          valor:    item.valor||0,
+          local:    item.local||'',
+          num_nf:   item.num_nf||'',
+          data:     item.data||new Date().toLocaleDateString('pt-BR'),
+          empresa:  item.empresa||'S/A A GAZETA',
+          cod_fornec: '',
+          id_datasul: '',
+          centro_custo: '',
+          conta_contabil: '',
+          num_ordem: '',
+          num_requisicao: '',
+        };
         setQueue(function(p){return[queueItem,...p];});
         setShowCapture(false);
         toast.success('📸 Enviado para Caixa de entrada!');
+        setTab('inbox');
       },
       onClose:function(){setShowCapture(false);},toast:toast}),
     // Mobile: FAB + Bottom Nav
@@ -4124,7 +4165,7 @@ function App() {
           )
         ),
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
-        tab==='apresentacao'&&e(TabApresentacao,{user,setTab,toast}),
+        tab==='apresentacao'&&e(TabManual,{user:user}),
         tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast}),
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast}),
@@ -4135,7 +4176,6 @@ function App() {
         tab==='movimentacao'&&e(TabMovimentacao,{lanc,user,sMap,toast}),
         tab==='envios'&&e(TabEnvios,{lanc,sMap,toast}),
         tab==='admin'&&e(TabAdmin,{users,setUsers,sMap,setSMap,sLim,setSLim,companies:comp,setCompanies:setComp,currentUser:user,toast}),
-        tab==='manual'&&e(TabManual,{user:user})
       )
     )
   );
