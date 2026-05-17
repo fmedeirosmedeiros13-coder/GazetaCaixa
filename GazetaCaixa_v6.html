@@ -1756,100 +1756,27 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
 
   const ATS = [{k:'TODOS',l:'Todos'},{k:'VERDE',l:'✓ Auditados'},{k:'AMARELO',l:'✎ Manuais'},{k:'VERMELHO',l:'✗ Divergentes'}];
 
-  // Campos obrigatórios do formulário
-  var CAMPOS_OBRIG = {
-    setor:      'Setor',
-    empresa:    'Empresa',
-    portador:   'Portador',
-    valor:      'Valor (R$)',
-    local:      'Fornecedor / Estabelecimento',
-    cod_fornec: 'Cód. Fornecedor TOTVS',
-  };
 
-  // Valida todos os campos e retorna objeto de erros
-  function validaCampos() {
-    var erros = {};
-    Object.keys(CAMPOS_OBRIG).forEach(function(k){
-      if(!f[k]||!f[k].toString().trim()) erros[k] = CAMPOS_OBRIG[k]+' é obrigatório';
-    });
-    if(f.valor && isNaN(parseFloat(f.valor.replace(',','.')))) erros['valor'] = 'Valor inválido — use números';
-    return erros;
-  }
 
-  // Estilo dinâmico: IA (azul) > Erro (vermelho) > Normal
-  function fieldStyle(fieldKey, baseExtra) {
-    var isAi  = aiFields.has(fieldKey);
-    var hasErr = submitted && fieldErrors[fieldKey];
-    var locked = isAi && AI_LOCK;
-    var borderColor = hasErr ? C.red : isAi ? C.blue : C.border;
-    var bgColor     = hasErr ? C.red+'0d' : isAi ? C.blue+'0d' : C.bg3;
-    return Object.assign({
-      width:'100%',
-      background: bgColor,
-      border: '1px solid ' + borderColor,
-      borderRadius: 7,
-      padding: '8px 10px',
-      color: locked ? C.text2 : C.text0,
-      fontSize: 13,
-      cursor: locked ? 'not-allowed' : 'text',
-      outline: (isAi||hasErr) ? '1px solid '+borderColor+'44' : 'none',
-      outlineOffset: '1px',
-      transition: 'border-color .2s, background .2s',
-    }, baseExtra||{});
-  }
-
-  // Mantém aiStyle como alias para compatibilidade
-  function aiStyle(fieldKey, baseExtra) { return fieldStyle(fieldKey, baseExtra); }
-
-  // Hint dinâmico do campo
-  function fieldHint(fieldKey) {
-    if(submitted && fieldErrors[fieldKey]) return '⚠ '+fieldErrors[fieldKey];
-    if(aiFields.has(fieldKey)) return AI_LOCK ? '🔒 Preenchido pela IA — somente leitura' : '🤖 Preenchido pela IA/OCR';
-    return null;
-  }
-  function fieldHintColor(fieldKey) {
-    if(submitted && fieldErrors[fieldKey]) return C.red;
-    if(aiFields.has(fieldKey)) return C.blue;
-    return undefined;
-  }
-
-  function aiProps(fieldKey) {
-    return {
-      readOnly: aiFields.has(fieldKey) && AI_LOCK,
-      disabled: aiFields.has(fieldKey) && AI_LOCK,
-      title: aiFields.has(fieldKey)
-        ? (AI_LOCK ? '🔒 Preenchido pela IA — somente leitura' : '🤖 Preenchido pela IA/OCR')
-        : '',
-    };
-  }
-
-  // ── PDF: função de geração ──────────────────────────────────────────────
+  // ── Geração de PDF ──────────────────────────────────────────────────────
   function gerarPDF() {
     var now = new Date();
-    var dataHora = now.toLocaleDateString('pt-BR') + ' às ' +
-      now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-    var usuario = user.name + ' (' + (user.position||user.role) + ')';
+    var dataHora = now.toLocaleDateString('pt-BR')+' às '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    var usuario = user.name+' ('+(user.position||user.role)+')';
     var labels = {todos:'Todos os períodos',mes_atual:'Mês atual',
       mes_anterior:'Mês anterior',ultimos_30:'Últimos 30 dias',ultimos_90:'Últimos 90 dias'};
-    var filtroDesc = labels[fPeriodo] || (fDtIni&&fDtFim ?
-      fDtIni.split('-').reverse().join('/')+' a '+fDtFim.split('-').reverse().join('/') : 'Personalizado');
-    var setorDesc = fS || 'Todos os setores';
+    var filtroDesc = labels[fPeriodo]||(fDtIni&&fDtFim?
+      fDtIni.split('-').reverse().join('/')+' a '+fDtFim.split('-').reverse().join('/'):'Personalizado');
+    var setorDesc = fS||'Todos os setores';
     var footer = document.getElementById('rg-print-footer');
-    if(footer) footer.innerHTML =
-      '<span style="font-weight:700">REDE GAZETA — Controle de Caixa Rotativo</span>'+
-      '<span>Período: <b>'+filtroDesc+'</b> &nbsp;|&nbsp; Setor: <b>'+setorDesc+'</b></span>'+
+    if(!footer){footer=document.createElement('div');footer.id='rg-print-footer';document.body.appendChild(footer);}
+    footer.innerHTML =
+      '<span><b>REDE GAZETA</b> — Controle de Caixa Rotativo</span>'+
+      '<span>Período: <b>'+filtroDesc+'</b> | Setor: <b>'+setorDesc+'</b></span>'+
       '<span>Gerado por <b>'+usuario+'</b> em <b>'+dataHora+'</b></span>';
-    // Força A4 paisagem via CSS dinâmico
-    var styleTag = document.getElementById('rg-print-style');
-    if(!styleTag) {
-      styleTag = document.createElement('style');
-      styleTag.id = 'rg-print-style';
-      document.head.appendChild(styleTag);
-    }
-    styleTag.textContent = '@page { size: A4 landscape !important; margin: 14mm 10mm 20mm 10mm; }';
     window.print();
+    setTimeout(function(){var f=document.getElementById('rg-print-footer');if(f)f.remove();},1000);
   }
-
 
   return e('div',{className:'au'},
     e(Modal,{open:!!scanItem,onClose:()=>setScanItem(null),
@@ -2268,9 +2195,6 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast}) {
   const [load,setLoad] = useState(false);
   // Campos preenchidos pela IA/OCR — borda azul + bloqueio
   const [aiFields,setAiFields] = useState(new Set());
-  // REGRA: quando ONLINE (GitHub Pages), campos IA são somente leitura
-  // Para ativar após publicar: const AI_LOCK = true;
-  const AI_LOCK = false; // muda para true após publicar no GitHub Pages
   // Validação visual — campos com erro ficam com borda vermelha
   const [submitted,setSubmitted] = useState(false); // true após clicar em salvar
   const [fieldErrors,setFieldErrors] = useState({});
@@ -3335,7 +3259,14 @@ function App() {
   const [confReset,setConfReset] = useState(false);
 
   const aportes = useMemo(()=>calcAportes(lanc,sLim),[lanc,sLim]);
-  const bc = useMemo(()=>queue.filter(d=>d.status==='pendente'&&((user?user.hasGlobalAccess:false)||(user&&user.allowedSectors?user.allowedSectors.includes:function(){return false;})('TODOS')||(user&&user.allowedSectors?user.allowedSectors.includes:function(){return false;})(d.setor))).length,[queue,user]);
+  const bc = useMemo(()=>queue.filter(function(d){
+    if(d.status!=='pendente') return false;
+    if(!user) return false;
+    if(user.hasGlobalAccess) return true;
+    if(!user.allowedSectors) return false;
+    if(user.allowedSectors.indexOf('TODOS')>-1) return true;
+    return user.allowedSectors.indexOf(d.setor)>-1;
+  }).length,[queue,user]);
 
   function addL(item){setLanc(p=>{if(item.num_nf&&item.num_nf!==''&&p.some(l=>l.num_nf===item.num_nf&&l.setor===item.setor)){toast.error('⚠ Anti-duplicidade: NF já lançada neste setor.');return p;}return[item,...p];});}
 
