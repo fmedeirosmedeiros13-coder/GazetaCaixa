@@ -2751,90 +2751,227 @@ function TabImport({onBatchAdd,sMap,toast}) {
 // ── INBOX ──────────────────────────────────────────────────────────────────────
 function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
   const [sel,setSel] = useState(null);
-  const [f,setF] = useState({num_nf:'',valor:'',local:'',cod_fornec:'',conta_contabil:'',empresa:'',portador:''});
+  const [f,setF] = useState({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',
+    cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
   const [fu,setFu] = useState(null);
   const fRef = useRef();
   const capRef = useRef();
-  const vis = queue.filter(d=>d.status!=='processado'&&(user.hasGlobalAccess||user.allowedSectors.includes('TODOS')||user.allowedSectors.includes(d.setor)));
+
+  const vis = queue.filter(d=>
+    d.status!=='processado'&&
+    (user.hasGlobalAccess||user.allowedSectors.includes('TODOS')||user.allowedSectors.includes(d.setor))
+  );
   const upd = (k,v)=>setF(p=>({...p,[k]:v}));
 
-  function open(doc){setSel(doc);setF({num_nf:(doc.aiMetadata?doc.aiMetadata.num_nf:null)||'',valor:(doc.aiMetadata?doc.aiMetadata.valor:null)||'',local:(doc.aiMetadata?doc.aiMetadata.fornecedor:null)||'',cod_fornec:'',conta_contabil:'',empresa:'',portador:doc.portador||''});setFu(doc.image||null);}
+  function open(doc){
+    setSel(doc);
+    setFu(doc.image||doc.documento_fiscal_url||null);
+    setF({
+      num_nf:   doc.num_nf  ||doc.aiMetadata?.num_nf   ||'',
+      valor:    doc.valor   ?String(doc.valor)          :doc.aiMetadata?.valor||'',
+      local:    doc.local   ||doc.aiMetadata?.fornecedor||'',
+      data:     doc.data    ||new Date().toLocaleDateString('pt-BR'),
+      portador: doc.portador||'',
+      empresa:  doc.empresa ||'S/A A GAZETA',
+      // Campos TOTVS — sempre vazios, preenchidos aqui pelo supervisor
+      cod_fornec:'', id_datasul:'', centro_custo:'',
+      conta_contabil:'', num_ordem:'', num_requisicao:''
+    });
+  }
 
   function confirm() {
-    if(!f.num_nf||!f.valor||!f.local||!f.cod_fornec){toast.error('Preencha os campos obrigatórios.');return;}
-    onAdd({id:uid(),data:new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}),setor:sel.setor,portador:sel.portador||f.portador,local:f.local.toUpperCase(),valor:parseFloat(f.valor),tipo:'SAÍDA',empresa:f.empresa,cod_fornec:f.cod_fornec,num_nf:f.num_nf,conta_contabil:f.conta_contabil,auditStatus:sel.irregularidade?'pendente_auditoria':'conciliado',iaStatus:sel.irregularidade?'VERMELHO':'VERDE',documento_fiscal_url:fu||undefined,operador_nome:user.name,num_ordem:'',num_requisicao:'',centro_custo:'',id_datasul:''});
+    if(!f.valor||!f.local){toast.error('Preencha pelo menos Valor e Fornecedor.');return;}
+    var val=parseFloat(String(f.valor).replace(',','.'));
+    if(isNaN(val)||val<=0){toast.error('Valor inválido.');return;}
+    onAdd({
+      id:uid(),
+      data:f.data||new Date().toLocaleDateString('pt-BR'),
+      setor:sel.setor,
+      portador:sel.portador||f.portador,
+      local:f.local.toUpperCase(),
+      valor:val,
+      tipo:'SAÍDA',
+      empresa:f.empresa||'S/A A GAZETA',
+      num_nf:f.num_nf,
+      cod_fornec:f.cod_fornec,
+      id_datasul:f.id_datasul,
+      centro_custo:f.centro_custo,
+      conta_contabil:f.conta_contabil,
+      num_ordem:f.num_ordem,
+      num_requisicao:f.num_requisicao,
+      auditStatus:sel.irregularidade?'pendente_auditoria':'conciliado',
+      iaStatus:sel.irregularidade?'VERMELHO':'VERDE',
+      documento_fiscal_url:fu||undefined,
+      operador_nome:user.name,
+      conferido_por:user.name,
+    });
     setQueue(p=>p.map(d=>d.id===sel.id?{...d,status:'processado'}:d));
-    toast.success('✓ Lançamento confirmado!');
-    setSel(null);setF({num_nf:'',valor:'',local:'',cod_fornec:'',conta_contabil:'',empresa:'',portador:''});setFu(null);
+    toast.success('✓ Lançamento confirmado e registrado!');
+    setSel(null);
+    setF({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
+    setFu(null);
   }
 
   function newCap(ev) {
     const file=ev.target.files?.[0]; if(!file) return;
     const r=new FileReader();
     r.onloadend=()=>{
-      const nd={id:uid(),setor:user.allowedSectors.filter(s=>s!=='TODOS')[0]||'PROJETOS E EVENTOS',portador:'',descricao:'Nova captura',status:'pendente',capturedBy:user.name,timestamp:new Date().toISOString(),aiAlerts:[],irregularidade:false,isAuditing:true,image:r.result};
+      const nd={id:uid(),setor:user.allowedSectors.filter(s=>s!=='TODOS')[0]||'PROJETOS E EVENTOS',
+        portador:'',descricao:'Nova captura',status:'pendente',capturedBy:user.name,
+        timestamp:new Date().toISOString(),aiAlerts:[],irregularidade:false,isAuditing:true,image:r.result};
       setQueue(p=>[nd,...p]);toast.success('📸 Nota enviada para a fila!');
       setTimeout(()=>setQueue(p=>p.map(d=>d.id===nd.id?{...d,isAuditing:false}:d)),3000);
     };
     r.readAsDataURL(file);
   }
 
+  // ── TELA DE CONFERÊNCIA ──────────────────────────────────────────────────────
   if(sel) return e('div',{className:'au'},
     e(Card,null,
-      e(CardHdr,{title:'Complementar informações da nota',icon:'✍️'},e(Btn,{size:'sm',onClick:()=>setSel(null)},'← Voltar')),
-      e('div',{style:{display:'flex',minHeight:380}},
-        e('div',{style:{flex:'0 0 300px',background:'#000',display:'flex',alignItems:'center',justifyContent:'center',borderRight:'1px solid '+C.border,flexDirection:'column',gap:10,padding:12}},
-          fu?e('img',{src:fu,alt:'NF',style:{maxWidth:'100%',maxHeight:340,objectFit:'contain',borderRadius:6}}):e(Empty,{icon:'📷',title:'Sem imagem',sub:'Modo demo'}),
-          e('input',{type:'file',ref:fRef,accept:'image/*',onChange:ev=>{const file=ev.target.files?.[0];if(!file)return;const r=new FileReader();r.onloadend=()=>setFu(r.result);r.readAsDataURL(file);},style:{display:'none'}}),
-          e(Btn,{size:'sm',onClick:()=>fRef.current&&fRef.current.click()},'📎 Anexar')
+      e(CardHdr,{title:'Conferência do documento',icon:'✍️',sub:'Setor: '+sel.setor+' · Enviado por: '+(sel.capturedBy||sel.operador_nome||'—')},
+        e(Btn,{size:'sm',onClick:()=>setSel(null)},'← Voltar')
+      ),
+      e('div',{style:{display:'flex',minHeight:420,flexWrap:'wrap'}},
+
+        // Painel esquerdo — foto
+        e('div',{style:{flex:'0 0 320px',background:'#000',display:'flex',flexDirection:'column',
+          alignItems:'center',justifyContent:'center',borderRight:'1px solid '+C.border,gap:10,padding:12}},
+          fu
+            ? e('img',{src:fu,alt:'NF',style:{maxWidth:'100%',maxHeight:360,objectFit:'contain',borderRadius:8,border:'1px solid '+C.border}})
+            : e(Empty,{icon:'📷',title:'Sem imagem',sub:'Lançamento manual'}),
+          e('input',{type:'file',ref:fRef,accept:'image/*',onChange:ev=>{
+            const file=ev.target.files?.[0];if(!file)return;
+            const r=new FileReader();r.onloadend=()=>setFu(r.result);r.readAsDataURL(file);
+          },style:{display:'none'}}),
+          e(Btn,{size:'sm',onClick:()=>fRef.current&&fRef.current.click()},'📎 Trocar imagem')
         ),
-        e('div',{style:{flex:1,padding:18,display:'flex',flexDirection:'column',gap:12,overflow:'auto'}},
-          e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},e(Badge,{color:'blue'},sel.setor),sel.irregularidade&&e(Badge,{color:'red'},'⚠ Item irregular')),
-          sel.irregularidade&&e('div',{style:{background:C.redBg,border:'1px solid '+C.red+'44',borderRadius:7,padding:'10px',fontSize:12,color:C.red}},'⚠ IA detectou: ',e('strong',null,sel.aiAlerts.join(', '))),
-          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
-            e(Fld,{label:'Nº da nota *'},e(TI,{value:f.num_nf,onChange:v=>upd('num_nf',v),placeholder:'Ex: 497480',mono:true})),
-            e(Fld,{label:'Valor (R$) *'},e(TI,{value:f.valor,onChange:v=>upd('valor',v),type:'number',placeholder:'0,00',mono:true})),
-            e(Fld,{label:'Cód. fornecedor TOTVS *'},e(TI,{value:f.cod_fornec,onChange:v=>upd('cod_fornec',v),placeholder:'Obrigatório'})),
-            e(Fld,{label:'Conta contábil'},e(TI,{value:f.conta_contabil,onChange:v=>upd('conta_contabil',v),placeholder:'Ex: 510201',mono:true})),
-            e(Fld,{label:'Nome do fornecedor *',span:2},e(TI,{value:f.local,onChange:v=>upd('local',v),placeholder:'Ex: Posto Shell'})),
-            e(Fld,{label:'Empresa'},e(SI,{value:f.empresa,onChange:v=>upd('empresa',v),options:companies})),
-            e(Fld,{label:'Portador'},e(SI,{value:f.portador,onChange:v=>upd('portador',v),options:sMap[sel.setor]||[]}))
+
+        // Painel direito — formulário
+        e('div',{style:{flex:1,padding:20,display:'flex',flexDirection:'column',gap:14,overflow:'auto'}},
+
+          sel.irregularidade&&e('div',{style:{background:C.redBg,border:'1px solid '+C.red+'44',
+            borderRadius:8,padding:'10px 14px',fontSize:12,color:C.red}},
+            '⚠ IA detectou item irregular: ',e('strong',null,(sel.aiAlerts||[]).join(', '))
           ),
-          e('div',{style:{display:'flex',gap:10,marginTop:'auto',paddingTop:12,borderTop:'1px solid '+C.border}},
-            e(Btn,{variant:'danger',onClick:()=>{setQueue(p=>p.filter(d=>d.id!==sel.id));setSel(null);toast.info('Item removido.')}},'🗑 Excluir'),
-            e(Btn,{variant:'primary',onClick:confirm,style:{flex:1,justifyContent:'center'}},'✓ Confirmar lançamento')
+
+          // Seção 1 — Dados lidos pela IA (preenchidos, editáveis)
+          e('div',{style:{background:C.blueBg,border:'1px solid '+C.blue+'33',borderRadius:8,padding:'12px 14px'}},
+            e('div',{style:{fontSize:10,fontWeight:700,color:C.blue,textTransform:'uppercase',
+              letterSpacing:'.07em',marginBottom:10}},'📋 Dados lidos pela IA — confira e corrija se necessário'),
+            e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              e(Fld,{label:'Fornecedor / Estabelecimento *'},
+                e(TI,{value:f.local,onChange:v=>upd('local',v),placeholder:'Nome do fornecedor'})
+              ),
+              e(Fld,{label:'Valor (R$) *'},
+                e(TI,{value:f.valor,onChange:v=>upd('valor',v),placeholder:'0,00',mono:true})
+              ),
+              e(Fld,{label:'Data'},
+                e(TI,{value:f.data,onChange:v=>upd('data',v),placeholder:'DD/MM/AAAA'})
+              ),
+              e(Fld,{label:'Nº Nota Fiscal'},
+                e(TI,{value:f.num_nf,onChange:v=>upd('num_nf',v),placeholder:'Número da NF',mono:true})
+              ),
+              e(Fld,{label:'Portador'},
+                e(SI,{value:f.portador,onChange:v=>upd('portador',v),options:sMap[sel.setor]||[]})
+              ),
+              e(Fld,{label:'Empresa'},
+                e(SI,{value:f.empresa,onChange:v=>upd('empresa',v),options:companies})
+              )
+            )
+          ),
+
+          // Seção 2 — Dados TOTVS (obrigatório preencher aqui)
+          e('div',{style:{background:C.bg2,border:'1px solid '+C.amber+'44',borderRadius:8,padding:'12px 14px'}},
+            e('div',{style:{fontSize:10,fontWeight:700,color:C.amber,textTransform:'uppercase',
+              letterSpacing:'.07em',marginBottom:10}},'🗄️ Dados TOTVS / Datasul — preencha para registrar'),
+            e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              e(Fld,{label:'Cód. Fornecedor TOTVS'},
+                e(TI,{value:f.cod_fornec,onChange:v=>upd('cod_fornec',v),placeholder:'Ex: 5929',mono:true})
+              ),
+              e(Fld,{label:'ID Datasul'},
+                e(TI,{value:f.id_datasul,onChange:v=>upd('id_datasul',v),placeholder:'Ex: DS-00123',mono:true})
+              ),
+              e(Fld,{label:'Centro de Custo'},
+                e(TI,{value:f.centro_custo,onChange:v=>upd('centro_custo',v),placeholder:'Ex: 210101',mono:true})
+              ),
+              e(Fld,{label:'Conta Contábil'},
+                e(TI,{value:f.conta_contabil,onChange:v=>upd('conta_contabil',v),placeholder:'Ex: 510201',mono:true})
+              ),
+              e(Fld,{label:'Nº da Ordem'},
+                e(TI,{value:f.num_ordem,onChange:v=>upd('num_ordem',v),placeholder:'Ex: 98765',mono:true})
+              ),
+              e(Fld,{label:'Nº Requisição'},
+                e(TI,{value:f.num_requisicao,onChange:v=>upd('num_requisicao',v),placeholder:'Ex: REQ-123',mono:true})
+              )
+            )
+          ),
+
+          // Botões
+          e('div',{style:{display:'flex',gap:10,marginTop:4}},
+            e(Btn,{variant:'danger',onClick:()=>{
+              if(window.confirm('Excluir este documento da fila?')){
+                setQueue(p=>p.filter(d=>d.id!==sel.id));
+                setSel(null);toast.info('Documento removido.');
+              }
+            }},'🗑 Excluir'),
+            e(Btn,{variant:'primary',onClick:confirm,full:true},'✅ Confirmar e registrar lançamento')
           )
         )
       )
     )
   );
 
+  // ── LISTA DA CAIXA DE ENTRADA ────────────────────────────────────────────────
   return e('div',{className:'au'},
-    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
-      e('span',{style:{fontSize:13,color:C.text1}},vis.length+' documento(s) na fila'),
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}},
+      e('div',null,
+        e('span',{style:{fontSize:14,fontWeight:600,color:C.text0}},vis.length+' documento(s) aguardando conferência'),
+        e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},'Clique em um documento para conferir e registrar')
+      ),
       e('div',null,
         e('input',{type:'file',ref:capRef,accept:'image/*',capture:'environment',onChange:newCap,style:{display:'none'}}),
         e(Btn,{variant:'primary',onClick:()=>capRef.current&&capRef.current.click()},'📸 Captura de campo')
       )
     ),
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}},
-      vis.map(doc=>e('div',{key:doc.id,onClick:()=>open(doc),style:{background:C.bg1,border:'1px solid '+doc.irregularidade?C.red:C.border,borderRadius:10,overflow:'hidden',cursor:'pointer',transition:'all .15s'}},
-        e('div',{style:{height:120,background:C.bg2,display:'flex',alignItems:'center',justifyContent:'center',position:'relative',overflow:'hidden'}},
-          doc.image?e('img',{src:doc.image,alt:'',style:{width:'100%',height:'100%',objectFit:'cover',opacity:.7}}):e('span',{style:{fontSize:40}},'📄'),
-          e('div',{style:{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(15,23,42,.8),transparent)'}}),
-          e('div',{style:{position:'absolute',top:8,right:8,display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end'}},
-            e('span',{style:{background:doc.irregularidade?C.redBg:C.blueBg,color:doc.irregularidade?C.red:C.blue,fontSize:10,padding:'2px 8px',borderRadius:10}},doc.setor.substring(0,16)),
-            doc.irregularidade&&e('span',{style:{background:C.redBg,color:C.red,fontSize:9,padding:'2px 7px',borderRadius:10,fontWeight:700}},'⚠ IRREGULAR'),
-            doc.isAuditing&&e('span',{style:{background:C.amberBg,color:C.amber,fontSize:9,padding:'2px 7px',borderRadius:10,display:'flex',alignItems:'center',gap:3}},e(Spin,{s:8}),'AUDITANDO')
-          )
-        ),
-        e('div',{style:{padding:'10px 12px'}},
-          e('p',{style:{fontWeight:500,fontSize:12,marginBottom:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},doc.descricao||'Sem descrição'),
-          e('p',{style:{fontSize:10,color:C.text2}},'📷 '+doc.capturedBy+' · '+fmtDt(doc.timestamp))
+    vis.length===0
+      ? e(Empty,{icon:'📭',title:'Caixa vazia',sub:"Nenhum documento aguardando conferência."})
+      : e('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:14}},
+          vis.map(doc=>e('div',{key:doc.id,onClick:()=>open(doc),
+            style:{background:C.bg1,border:'1px solid '+(doc.irregularidade?C.red:C.border),
+              borderRadius:10,overflow:'hidden',cursor:'pointer',transition:'border .15s',
+              ':hover':{borderColor:C.blue}}},
+            // Miniatura da foto
+            e('div',{style:{height:140,background:C.bg3,position:'relative',overflow:'hidden',
+              display:'flex',alignItems:'center',justifyContent:'center'}},
+              (doc.image||doc.documento_fiscal_url)
+                ? e('img',{src:doc.image||doc.documento_fiscal_url,alt:'',
+                    style:{width:'100%',height:'100%',objectFit:'cover'}})
+                : e('span',{style:{fontSize:48,opacity:.3}},'🧾'),
+              e('div',{style:{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(15,23,42,.85),transparent)'}}),
+              // Badges
+              e('div',{style:{position:'absolute',top:8,left:8,right:8,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+                e('span',{style:{background:'rgba(0,0,0,.7)',color:C.blueHi,fontSize:9,
+                  padding:'2px 7px',borderRadius:8,fontWeight:600}},doc.setor.substring(0,18)),
+                doc.irregularidade&&e('span',{style:{background:C.redBg,color:C.red,
+                  fontSize:9,padding:'2px 7px',borderRadius:8,fontWeight:700}},'⚠ IRREGULAR')
+              ),
+              // Valor se disponível
+              doc.valor&&e('div',{style:{position:'absolute',bottom:8,right:8,
+                background:'rgba(0,0,0,.8)',color:C.green,fontSize:13,fontWeight:700,
+                padding:'2px 8px',borderRadius:6,fontFamily:C.mono}},'R$ '+fmt(doc.valor))
+            ),
+            // Info
+            e('div',{style:{padding:'10px 12px'}},
+              e('div',{style:{fontSize:12,fontWeight:600,color:C.text0,overflow:'hidden',
+                textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:3}},
+                doc.local||(doc.aiMetadata?.fornecedor)||doc.descricao||'Sem descrição'),
+              e('div',{style:{fontSize:10,color:C.text2,display:'flex',justifyContent:'space-between'}},
+                e('span',null,'👤 '+(doc.capturedBy||doc.operador_nome||'—')),
+                e('span',null,fmtDt(doc.timestamp))
+              )
+            )
+          ))
         )
-      )),
-      vis.length===0&&e('div',{style:{gridColumn:'span 3'}},e(Empty,{icon:'📭',title:'Fila vazia',sub:"Use 'Captura de campo' para enviar notas."}))
-    )
   );
 }
 
@@ -3377,7 +3514,22 @@ function App() {
       onLogout:function(){setUser(null);setTab('apresentacao');},isAdmin:isA}),
     // Mobile: OCR Capture
     isMobile&&showCapture&&e(MobileCapture,{user:user,sMap:sMap,
-      onAdd:function(item){addL(item);setShowCapture(false);},
+      onAdd:function(item){
+        // Lançamento do celular vai para Caixa de entrada para conferência
+        var queueItem=Object.assign({},item,{
+          status:'pendente',
+          capturedBy:item.operador_nome||user.name,
+          timestamp:new Date().toISOString(),
+          aiAlerts:[],
+          irregularidade:false,
+          isAuditing:false,
+          image:item.documento_fiscal_url||null,
+          descricao:item.local||'Captura mobile',
+        });
+        setQueue(function(p){return[queueItem,...p];});
+        setShowCapture(false);
+        toast.success('📸 Enviado para Caixa de entrada!');
+      },
       onClose:function(){setShowCapture(false);},toast:toast}),
     // Mobile: FAB + Bottom Nav
     isMobile&&!showCapture&&e('button',{className:'mob-fab',
