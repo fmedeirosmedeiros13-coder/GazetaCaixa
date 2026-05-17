@@ -1304,6 +1304,38 @@ function Sidebar({tab,setTab,user,onLogout,bc}) {
 }
 
 
+// Parser dedicado para resposta estruturada do Gemini
+function parseGeminiResponse(text) {
+  if(!text) return null;
+  var lines = text.split('\n');
+  var result = {};
+  lines.forEach(function(line) {
+    var colon = line.indexOf(':');
+    if(colon < 0) return;
+    var key = line.substring(0, colon).trim().toUpperCase();
+    var val = line.substring(colon+1).trim();
+    // Remove colchetes se Gemini retornou o template
+    val = val.replace(/^\[|\]$/g,'').trim();
+    if(!val || val==='NAO IDENTIFICADO' || val==='NÃO IDENTIFICADO') val = null;
+    if(key==='VALOR') result.valor = val ? 'R$ '+val.replace(/[R$\s]/g,'') : null;
+    if(key==='DATA') result.data = val;
+    if(key==='FORNECEDOR') result.local = val;
+    if(key==='CNPJ') result.cnpj = val;
+    if(key==='NF') result.nf = val;
+    if(key==='PROIBIDOS') result.proibidos = val && val!=='NENHUM' ? val : null;
+  });
+  // Só usa se extraiu pelo menos valor ou data
+  if(!result.valor && !result.data) return null;
+  return {
+    valor: result.valor || 'Não lido',
+    data:  result.data  || 'Não lido',
+    local: result.local || 'Não identificado',
+    nf:    result.nf    || 'Não lido',
+    cnpj:  result.cnpj  || 'Não identificado',
+    proibidos: result.proibidos || null,
+  };
+}
+
 function ScannerModal(props) {
   var item = props.item;
   var onClose = props.onClose;
@@ -1511,13 +1543,20 @@ function ScannerModal(props) {
           try{
             var resp=JSON.parse(xhr.responseText);
             var text=resp.candidates[0].content.parts[0].text;
-            processaTextoOCR(text);
+            // Tenta parser estruturado do Gemini primeiro
+            var parsed = parseGeminiResponse(text);
+            if(parsed) {
+              setOcrData(parsed);
+              setOcrRunning(false);
+            } else {
+              processaTextoOCR(text);
+            }
           }catch(e){usaTesseract();}
         };
         xhr.onerror=function(){usaTesseract();};
         xhr.send(JSON.stringify({contents:[{parts:[
           {text:"Analise este documento fiscal. Pode ser nota fiscal, cupom fiscal, DANFE ou comprovante de cartão. Retorne EXATAMENTE neste formato:\nVALOR: [somente o valor total em reais, ex: 162,75]\nDATA: [data DD/MM/AAAA]\nFORNECEDOR: [se for NF ou cupom fiscal: razão social da empresa emitente. Se for comprovante de cartão/saque: nome do estabelecimento onde foi usado, ex: SUPERMERCADO BOM PRECO, POSTO SHELL. Se não identificar: NÃO IDENTIFICADO]\nCNPJ: [CNPJ só números, ou NAO IDENTIFICADO]\nNF: [número do documento, ou NAO IDENTIFICADO]\nPROIBIDOS: [NENHUM, ou liste itens: cerveja/vinho/whisky/cigarro/fumo se encontrar na lista de produtos]\nResponda SOMENTE essas 6 linhas, sem explicações."},
-          {inline_data:{mime_type:"image/jpeg",data:r.result.split(',')[1]}}
+          {inline_data:{mime_type:f.type||'image/jpeg',data:r.result.split(',')[1]}}
         ]}]}));
       } else {
         usaTesseract();
