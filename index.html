@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Rede Gazeta — Controle de Caixa v8.0</title>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -216,19 +219,73 @@ table{border-collapse:collapse;width:100%}
 // FIREBASE + GEMINI — substitua com suas credenciais reais
 // ═══════════════════════════════════════════════════════════
 var FIREBASE_CONFIG = {
-  apiKey:            "COLE_SUA_API_KEY_AQUI",
-  authDomain:        "COLE_SEU_AUTH_DOMAIN_AQUI",
-  projectId:         "COLE_SEU_PROJECT_ID_AQUI",
-  storageBucket:     "COLE_SEU_STORAGE_BUCKET_AQUI",
-  messagingSenderId: "COLE_SEU_MESSAGING_SENDER_ID_AQUI",
-  appId:             "COLE_SEU_APP_ID_AQUI",
+  apiKey:            "AIzaSyD3QYSv9JzqvOwQBP4giK32VTzvS9dtTs4",
+  authDomain:        "gazeta-caixa.firebaseapp.com",
+  projectId:         "gazeta-caixa",
+  storageBucket:     "gazeta-caixa.firebasestorage.app",
+  messagingSenderId: "95409640247",
+  appId:             "1:95409640247:web:db62baa4edc37f7518c0b2"
 };
 var GEMINI_API_KEY = ""; // OCR via Cloudflare Worker — chave segura no servidor
-var FIREBASE_OK = false; // muda para true após configurar
+var FIREBASE_OK = true; // Firebase configurado e ativo
 
+// ── Inicialização Firebase ────────────────────────────────────────────────
+var _fbApp = null;
+var _db = null;
+
+function initFirebase() {
+  try {
+    if(typeof firebase === 'undefined') {
+      console.warn('Firebase SDK ainda não carregou, tentando novamente...');
+      return false;
+    }
+    if(!firebase.apps.length) {
+      _fbApp = firebase.initializeApp(FIREBASE_CONFIG);
+    } else {
+      _fbApp = firebase.app();
+    }
+    _db = firebase.firestore();
+    console.log('Firebase inicializado ✅');
+    return true;
+  } catch(e) {
+    console.error('Firebase erro:', e);
+    return false;
+  }
+}
+
+// Salvar lançamento no Firestore
 function salvarLancamento(item) {
-  if(!FIREBASE_OK) return;
-  console.log("Firebase: salvar", item.id);
+  if(!_db) return;
+  _db.collection('lancamentos').doc(item.id).set(item)
+    .catch(function(e){ console.error('Erro ao salvar lançamento:', e); });
+}
+
+// Salvar item na fila (Caixa de Entrada)
+function salvarQueue(item) {
+  if(!_db) return;
+  _db.collection('queue').doc(item.id).set(item)
+    .catch(function(e){ console.error('Erro ao salvar queue:', e); });
+}
+
+// Atualizar status da queue
+function atualizarQueue(id, dados) {
+  if(!_db) return;
+  _db.collection('queue').doc(id).update(dados)
+    .catch(function(e){ console.error('Erro ao atualizar queue:', e); });
+}
+
+// Deletar item da queue
+function deletarQueue(id) {
+  if(!_db) return;
+  _db.collection('queue').doc(id).delete()
+    .catch(function(e){ console.error('Erro ao deletar queue:', e); });
+}
+
+// Deletar lançamento
+function deletarLancamento(id) {
+  if(!_db) return;
+  _db.collection('lancamentos').doc(id).delete()
+    .catch(function(e){ console.error('Erro ao deletar:', e); });
 }
 
 const e = React.createElement;
@@ -2857,6 +2914,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
       conferido_por:user.name,
     });
     setQueue(p=>p.map(d=>d.id===sel.id?{...d,status:'processado'}:d));
+    atualizarQueue(sel.id, {status:'processado'});
     toast.success('✓ Lançamento confirmado e registrado!');
     setSel(null);
     setF({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
@@ -2962,6 +3020,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast}) {
             e(Btn,{variant:'danger',onClick:()=>{
               if(window.confirm('Excluir este documento da fila?')){
                 setQueue(p=>p.filter(d=>d.id!==sel.id));
+                deletarQueue(sel.id);
                 setSel(null);toast.info('Documento removido.');
               }
             }},'🗑 Excluir'),
@@ -3196,7 +3255,7 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
               e(TD,null,e(ABadge,{status:item.auditStatus})),
               e(TD,null,e('div',{style:{display:'flex',gap:4}},
                 item.documento_fiscal_url&&e(Btn,{size:'sm',onClick:()=>setVUrl(item.documento_fiscal_url)},'👁'),
-                e(Btn,{size:'sm',variant:'danger',onClick:()=>{if(window.confirm('Remover registro?'))setLanc(p=>p.filter(l=>l.id!==item.id));}},'🗑')
+                e(Btn,{size:'sm',variant:'danger',onClick:()=>{if(window.confirm('Remover registro?'))setLanc(p=>p.filter(l=>l.id!==item.id));deletarLancamento(item.id);;}},'🗑')
               ))
             )),
             fil.length===0&&e('tr',null,e('td',{colSpan:9},e(Empty,{icon:'🗄️',title:'Nenhum registro',sub:'Ajuste os filtros.'}))),
@@ -4118,6 +4177,51 @@ function App() {
   const [saved,setSaved] = useState(null);
   const [confReset,setConfReset] = useState(false);
 
+  // ── Firebase: inicializar e escutar dados em tempo real ──────────────────
+  useEffect(function(){
+    if(!FIREBASE_OK) return;
+    // Retry até Firebase SDK carregar
+    function tryInit(tentativa) {
+      var ok = initFirebase();
+      if(!ok && tentativa < 10) {
+        setTimeout(function(){ tryInit(tentativa+1); }, 300);
+        return;
+      }
+      if(!ok) { 
+        console.warn('Firebase offline — sistema funcionando em modo local. Dados não serão sincronizados entre dispositivos.');
+        return; 
+      }
+      startListeners();
+    }
+    function startListeners() {
+
+    // Escutar lançamentos em tempo real
+    var unsubLanc = _db.collection('lancamentos')
+      .orderBy('_ts', 'desc')
+      .onSnapshot(function(snap){
+        var items = [];
+        snap.forEach(function(doc){ items.push(doc.data()); });
+        if(items.length > 0) setLanc(items);
+      }, function(e){ console.error('Lanc listener:', e); });
+
+    // Escutar queue (Caixa de Entrada) em tempo real
+    var unsubQueue = _db.collection('queue')
+      .where('status', '!=', 'processado')
+      .onSnapshot(function(snap){
+        var items = [];
+        snap.forEach(function(doc){ items.push(doc.data()); });
+        setQueue(function(prev){
+          // Manter itens locais que ainda não foram ao Firebase
+          var fbIds = items.map(function(i){return i.id;});
+          var soLocal = prev.filter(function(i){return !fbIds.includes(i.id);});
+          return [...items, ...soLocal];
+        });
+      }, function(e){ console.error('Queue listener:', e); });
+
+    } // fim startListeners
+    tryInit(0);
+  }, []);
+
   const aportes = useMemo(()=>calcAportes(lanc,sLim),[lanc,sLim]);
   const bc = useMemo(()=>queue.filter(function(d){
     if(d.status!=='pendente') return false;
@@ -4128,7 +4232,23 @@ function App() {
     return user.allowedSectors.indexOf(d.setor)>-1;
   }).length,[queue,user]);
 
-  function addL(item){setLanc(p=>{if(item.num_nf&&item.num_nf!==''&&p.some(l=>l.num_nf===item.num_nf&&l.setor===item.setor)){toast.error('⚠ Anti-duplicidade: NF já lançada neste setor.');return p;}return[item,...p];});}
+  function addL(item){
+    setLanc(function(p){
+      if(item.num_nf&&item.num_nf!==''&&p.some(function(l){return l.num_nf===item.num_nf&&l.setor===item.setor;})){
+        toast.error('⚠ Anti-duplicidade: NF já lançada neste setor.');return p;
+      }
+      // Salvar no Firebase
+      var fbItem = Object.assign({},item,{_ts: Date.now()});
+      salvarLancamento(fbItem);
+      return[fbItem,...p];
+    });
+  }
+
+  function addQueue(item){
+    var fbItem = Object.assign({},item,{_ts: Date.now()});
+    salvarQueue(fbItem);
+    setQueue(function(p){return[fbItem,...p];});
+  }
 
   if(!user) return e(React.Fragment,null,e(Toasts,{toasts,dismiss}),e(LoginScreen,{onLogin:u=>{setUser(u);setTab('dashboard');}}));
 
@@ -4169,7 +4289,7 @@ function App() {
           num_ordem: '',
           num_requisicao: '',
         };
-        setQueue(function(p){return[queueItem,...p];});
+        addQueue(queueItem);
         setShowCapture(false);
         toast.success('📸 Enviado para Caixa de entrada!');
         setTab('inbox');
@@ -4203,9 +4323,9 @@ function App() {
         ),
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
         tab==='apresentacao'&&e(TabManual,{user:user}),
-        tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){setQueue(function(p){return[item,...p];});setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}),
+        tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}),
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
-        tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){setQueue(function(p){return[item,...p];});setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
+        tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='import'&&e(TabImport,{onBatchAdd:items=>setLanc(p=>[...items,...p]),sMap,toast}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
