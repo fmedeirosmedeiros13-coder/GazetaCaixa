@@ -222,7 +222,7 @@ var FIREBASE_CONFIG = {
   messagingSenderId: "COLE_SEU_MESSAGING_SENDER_ID_AQUI",
   appId:             "COLE_SEU_APP_ID_AQUI",
 };
-var GEMINI_API_KEY = "AIzaSyBSkrlMR68_ZrVPo6mO6FXdv8jEQxXC4U0";
+var GEMINI_API_KEY = ""; // chave no Cloudflare Worker
 var FIREBASE_OK = false; // muda para true após configurar
 
 function salvarLancamento(item) {
@@ -377,28 +377,21 @@ const isoToBR = iso => { if(!iso) return ''; const [y,m,d]=iso.split('-'); retur
 const hasAcc = (user,setor) => { if(!user) return false; if(user.hasGlobalAccess||user.allowedSectors.includes('TODOS')) return true; return user.allowedSectors.includes(setor); };
 
 // Lista de itens proibidos (álcool e tabaco)
-// ── Gemini OCR — chamada direta à API ────────────────────────────────────
+// ── Gemini OCR via Cloudflare Worker (sem CORS) ──────────────────────────
+var WORKER_URL = 'https://gemini-proxy.fmedeirosmedeiros13.workers.dev';
 function geminiOCR(base64Image, mimeType, callback) {
-  var key = GEMINI_API_KEY;
-  if(!key) { callback(null, new Error('GEMINI_API_KEY não configurada.')); return; }
-  var prompt = 'Você é especialista em OCR de documentos fiscais brasileiros (DANFE, NFC-e, Cupom Fiscal, NFS-e, comprovante de cartão).\n\nExtraia com máxima precisão:\n1. valor: número decimal com ponto (ex: 372.38) — valor total final pago\n2. data: DD/MM/AAAA\n3. fornecedor: razão social em MAIÚSCULAS (máx 60 chars)\n4. cnpj: 14 dígitos sem pontuação\n5. num_nf: número do documento (só dígitos)\n6. chave_acesso: 44 dígitos se visível\n7. itens: [{descricao, quantidade, valor_total}] máx 10\n8. itens_proibidos: nomes de cerveja, vinho, whisky, vodka, gin, cachaça, cigarro, fumo encontrados\n\nRetorne APENAS JSON válido sem markdown:\n{"valor":0,"data":"","fornecedor":"","cnpj":"","num_nf":"","chave_acesso":"","itens":[],"itens_proibidos":[]}';
-  var body = {
-    contents:[{parts:[
-      {text: prompt},
-      {inline_data:{mime_type: mimeType||'image/jpeg', data: base64Image.replace(/^data:[^;]+;base64,/,'')}}
-    ]}],
-    generationConfig:{temperature:0.1, maxOutputTokens:1024}
-  };
-  fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key='+key, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  fetch(WORKER_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      imageBase64: base64Image.replace(/^data:[^;]+;base64,/, ''),
+      mimeType: mimeType || 'image/jpeg'
+    })
   })
   .then(function(r){ return r.json(); })
   .then(function(data){
-    var text = data&&data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts&&data.candidates[0].content.parts[0]&&data.candidates[0].content.parts[0].text||'';
-    if(!text) { callback(null, new Error('Gemini sem resposta')); return; }
-    var m = text.match(/\{[\s\S]*\}/);
-    if(!m) { callback(null, new Error('JSON inválido: '+text.substring(0,80))); return; }
-    callback(JSON.parse(m[0]), null);
+    if(data.error) { callback(null, new Error(data.error)); return; }
+    callback(data, null);
   })
   .catch(function(err){ callback(null, err); });
 }
