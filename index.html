@@ -222,7 +222,7 @@ var FIREBASE_CONFIG = {
   messagingSenderId: "COLE_SEU_MESSAGING_SENDER_ID_AQUI",
   appId:             "COLE_SEU_APP_ID_AQUI",
 };
-var GEMINI_API_KEY = ""; // chave no Cloudflare Worker
+var GEMINI_API_KEY = "AIzaSyDJcJG4XvhY0AdoIEJgeSw1c_xIJI8rbSQ";
 var FIREBASE_OK = false; // muda para true após configurar
 
 function salvarLancamento(item) {
@@ -380,45 +380,19 @@ const hasAcc = (user,setor) => { if(!user) return false; if(user.hasGlobalAccess
 // ── Gemini OCR via Cloudflare Worker (sem CORS) ──────────────────────────
 var WORKER_URL = 'https://gemini-proxy.fmedeirosmedeiros13.workers.dev';
 
-function compressImage(base64, mimeType, maxKB, cb) {
-  var img = new Image();
-  img.onload = function() {
-    var canvas = document.createElement('canvas');
-    var MAX_W = 1280, MAX_H = 1280;
-    var w = img.width, h = img.height;
-    if(w > MAX_W || h > MAX_H) {
-      var ratio = Math.min(MAX_W/w, MAX_H/h);
-      w = Math.round(w*ratio); h = Math.round(h*ratio);
-    }
-    canvas.width = w; canvas.height = h;
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-    var quality = 0.7;
-    var result = canvas.toDataURL('image/jpeg', quality);
-    // Reduz qualidade até caber no limite
-    while(result.length > maxKB*1024*1.37 && quality > 0.2) {
-      quality -= 0.1;
-      result = canvas.toDataURL('image/jpeg', quality);
-    }
-    cb(result.replace(/^data:[^;]+;base64,/, ''), 'image/jpeg');
-  };
-  img.src = 'data:'+(mimeType||'image/jpeg')+';base64,'+base64;
-}
-
 function geminiOCR(base64Image, mimeType, callback) {
   var b64 = base64Image.replace(/^data:[^;]+;base64,/, '');
-  compressImage(b64, mimeType, 700, function(compressed, mime) {
-    fetch(WORKER_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({imageBase64: compressed, mimeType: mime})
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if(data.error) { callback(null, new Error(data.error)); return; }
-      callback(data, null);
-    })
-    .catch(function(err){ callback(null, err); });
-  });
+  fetch(WORKER_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({imageBase64: b64, mimeType: mimeType||'image/jpeg'})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if(data.error) { callback(null, new Error(data.error)); return; }
+    callback(data, null);
+  })
+  .catch(function(err){ callback(null, err); });
 }
 
 
