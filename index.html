@@ -1314,10 +1314,8 @@ function ScannerModal(props) {
   var imgState = useState(item.documento_fiscal_url||null);
   var imgUrl = imgState[0]; var setImgUrl = imgState[1];
 
-  var ocrState = useState(item.documento_fiscal_url?{
-    valor:'R$ '+fmt(item.valor), data:item.data,
-    local:item.local, nf:item.num_nf||'Não lido', cnpj:'Não identificado'
-  }:null);
+  // ocrData começa null — só preenche após OCR realmente rodar
+  var ocrState = useState(null);
   var ocrData = ocrState[0]; var setOcrData = ocrState[1];
 
   var runningState = useState(false);
@@ -1518,7 +1516,7 @@ function ScannerModal(props) {
         };
         xhr.onerror=function(){usaTesseract();};
         xhr.send(JSON.stringify({contents:[{parts:[
-          {text:"Analise esta nota fiscal/cupom/DANFE e extraia EXATAMENTE:\nVALOR: (valor total pago em reais, formato 999,99)\nDATA: (data do documento, formato DD/MM/AAAA)\nFORNECEDOR: (razão social ou nome do estabelecimento)\nCNPJ: (somente números, 14 dígitos)\nNF: (número da nota/cupom)\nPROIBIDOS: (liste se há cerveja, vinho, whisky, vodka, cigarro, fumo - ou NENHUM)\nResponda APENAS com essas linhas, sem texto extra."},
+          {text:"Analise esta nota fiscal/cupom/DANFE. Extraia EXATAMENTE no formato abaixo:\nVALOR: [valor total pago, ex: 162,75]\nDATA: [data emissão DD/MM/AAAA]\nFORNECEDOR: [razão social da EMPRESA EMITENTE - ignore texto como SAQUE CARTÃO, procure o nome da loja/empresa que emitiu o documento, ex: POSTO SHELL LTDA, SUPERMERCADO X]\nCNPJ: [CNPJ da empresa emitente, só números]\nNF: [número da nota ou cupom fiscal]\nPROIBIDOS: [NENHUM, ou liste: cerveja/vinho/whisky/cigarro se encontrar]\nResponda SOMENTE essas 6 linhas."},
           {inline_data:{mime_type:"image/jpeg",data:r.result.split(',')[1]}}
         ]}]}));
       } else {
