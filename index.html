@@ -3491,6 +3491,161 @@ function SectForm({data,onSave,onCancel}) {
 // ── APP ROOT ───────────────────────────────────────────────────────────────────
 const TITLES = {apresentacao:'Início',captura:'Captura de NF',dashboard:'Consolidado geral',lancamento:'Lançamento manual',inbox:'Caixa de entrada',database:'Banco de dados',aportes:'Controle de aportes',movimentacao:'Movimentação por setor',import:'Importar extrato',envios:'Gestão de envios',admin:'Painel administrativo'};
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SISTEMA DE FECHAMENTO DE CAIXA — DIA 25
+// ═══════════════════════════════════════════════════════════════════════════
+
+function useFechamento() {
+  var hoje = new Date();
+  var diaHoje = hoje.getDate();
+  var mesHoje = hoje.getMonth();
+  var anoHoje = hoje.getFullYear();
+
+  // Próximo fechamento: dia 25 do mês atual ou do próximo
+  var fechamento;
+  if(diaHoje <= 25) {
+    fechamento = new Date(anoHoje, mesHoje, 25);
+  } else {
+    fechamento = new Date(anoHoje, mesHoje + 1, 25);
+  }
+
+  var diffMs = fechamento - hoje;
+  var diasRestantes = Math.ceil(diffMs / (1000*60*60*24));
+
+  // Nível de urgência
+  var nivel = null;
+  if(diasRestantes === 0) nivel = 'hoje';
+  else if(diasRestantes === 1) nivel = 'amanha';
+  else if(diasRestantes <= 3) nivel = 'critico';
+  else if(diasRestantes <= 5) nivel = 'urgente';
+  else if(diasRestantes <= 10) nivel = 'atencao';
+
+  var dataFmt = fechamento.toLocaleDateString('pt-BR', {day:'2-digit', month:'long'});
+
+  return { diasRestantes, nivel, dataFmt, fechamento };
+}
+
+function FechamentoBanner({lanc, user, setTab}) {
+  var fch = useFechamento();
+  var [dismissed, setDismissed] = useState(false);
+  var [showModal, setShowModal] = useState(false);
+
+  // Contar pendências do usuário
+  var pendentes = useMemo(function() {
+    return lanc.filter(function(l) {
+      if(l.auditStatus === 'conciliado' || l.auditStatus === 'auditado') return false;
+      if(!user) return false;
+      if(user.hasGlobalAccess || user.allowedSectors.indexOf('TODOS') > -1) return true;
+      return user.allowedSectors.indexOf(l.setor) > -1;
+    }).length;
+  }, [lanc, user]);
+
+  // Mostrar modal automático nos dias críticos ao logar
+  useEffect(function() {
+    if(fch.nivel === 'hoje' || fch.nivel === 'amanha' || fch.nivel === 'critico') {
+      var key = 'gz_fch_' + new Date().toDateString();
+      if(!localStorage.getItem(key)) {
+        setShowModal(true);
+        localStorage.setItem(key, '1');
+      }
+    }
+  }, [fch.nivel]);
+
+  if(!fch.nivel) return null;
+  if(dismissed && fch.nivel !== 'hoje') return null;
+
+  var cores = {
+    hoje:    { bg:'#1a0505', border:C.red,    icon:'🚨', cor:C.red,    pulsar:true  },
+    amanha:  { bg:'#1a0808', border:C.red,    icon:'⛔', cor:C.red,    pulsar:false },
+    critico: { bg:'#1a0e05', border:C.amber,  icon:'⚠️', cor:C.amber,  pulsar:false },
+    urgente: { bg:'#1a1205', border:C.amber,  icon:'📅', cor:C.amber,  pulsar:false },
+    atencao: { bg:'#0c1020', border:C.blue,   icon:'📋', cor:C.blue,   pulsar:false },
+  };
+  var c = cores[fch.nivel];
+
+  var msg = {
+    hoje:    'HOJE é o último dia para fechamento do caixa!',
+    amanha:  'AMANHÃ é o fechamento do caixa — preste contas hoje!',
+    critico: 'Faltam '+fch.diasRestantes+' dias para o fechamento do caixa',
+    urgente: 'Faltam '+fch.diasRestantes+' dias para o fechamento — dia '+fch.dataFmt,
+    atencao: 'Fechamento do caixa em '+fch.diasRestantes+' dias — '+fch.dataFmt,
+  };
+
+  return e(React.Fragment, null,
+    // Banner
+    e('div', {style:{
+      background: c.bg,
+      border: '1px solid '+c.border+'88',
+      borderRadius: 8,
+      padding: '10px 16px',
+      marginBottom: 16,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      animation: c.pulsar ? 'ocrGlow 2s ease-in-out infinite' : 'none',
+      flexWrap: 'wrap',
+    }},
+      e('span', {style:{fontSize:20, flexShrink:0}}, c.icon),
+      e('div', {style:{flex:1, minWidth:0}},
+        e('div', {style:{fontSize:13, fontWeight:700, color:c.cor}}, msg[fch.nivel]),
+        pendentes > 0 && e('div', {style:{fontSize:11, color:C.text2, marginTop:2}},
+          '📌 Você tem '+pendentes+' lançamento(s) pendente(s) de prestação de contas'
+        )
+      ),
+      e('div', {style:{display:'flex', gap:8, flexShrink:0}},
+        pendentes > 0 && e('button', {
+          onClick: function(){setTab('database');},
+          style:{background:c.cor, border:'none', color:'#fff', padding:'6px 14px',
+            borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:700}
+        }, 'Ver pendentes'),
+        fch.nivel !== 'hoje' && e('button', {
+          onClick: function(){setDismissed(true);},
+          style:{background:'transparent', border:'1px solid '+c.border+'55',
+            color:C.text2, padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:11}
+        }, '✕ Fechar')
+      )
+    ),
+    // Modal automático
+    showModal && e('div', {
+      style:{position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:2000,
+        display:'flex', alignItems:'center', justifyContent:'center', padding:16}
+    },
+      e('div', {style:{
+        background:C.bg1, border:'2px solid '+c.border,
+        borderRadius:14, width:'100%', maxWidth:440,
+        padding:28, animation:'fadeUp .3s ease', textAlign:'center'
+      }},
+        e('div', {style:{fontSize:48, marginBottom:12}}, c.icon),
+        e('div', {style:{fontSize:18, fontWeight:700, color:c.cor, marginBottom:8}},
+          fch.nivel==='hoje' ? '🚨 Hoje é o fechamento!' :
+          fch.nivel==='amanha' ? '⛔ Fechamento amanhã!' :
+          '⚠️ Fechamento em '+fch.diasRestantes+' dias'
+        ),
+        e('div', {style:{fontSize:13, color:C.text1, lineHeight:1.7, marginBottom:16}},
+          'O fechamento do caixa rotativo ocorre no dia ',
+          e('strong', {style:{color:c.cor}}, fch.dataFmt), '.',
+          pendentes > 0
+            ? e('span', null, ' Você ainda tem ', e('strong',{style:{color:C.red}}, pendentes+' lançamento(s)'), ' pendentes de prestação de contas.')
+            : e('span', {style:{color:C.green}}, ' ✅ Todos os seus lançamentos estão em dia!')
+        ),
+        e('div', {style:{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}},
+          pendentes > 0 && e('button', {
+            onClick:function(){setShowModal(false);setTab('database');},
+            style:{background:c.cor, border:'none', color:'#fff', padding:'11px 24px',
+              borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700}
+          }, '📋 Ver pendentes agora'),
+          e('button', {
+            onClick:function(){setShowModal(false);},
+            style:{background:'transparent', border:'1px solid '+C.border, color:C.text1,
+              padding:'11px 24px', borderRadius:8, cursor:'pointer', fontSize:13}
+          }, 'Entendido')
+        )
+      )
+    )
+  );
+}
+
 function App() {
   const {toasts,dismiss,toast} = useToast();
   const [user,setUser] = useState(null);
@@ -3572,6 +3727,7 @@ function App() {
             e(Btn,{size:'sm',onClick:()=>{const n=new Date();setSaved('Salvo em '+n.toLocaleDateString('pt-BR')+' às '+n.toLocaleTimeString('pt-BR'));toast.success('Dados salvos!');}}, '💾 Salvar lote')
           )
         ),
+        e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
         tab==='apresentacao'&&e(TabApresentacao,{user,setTab,toast}),
         tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast}),
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
