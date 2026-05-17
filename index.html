@@ -1273,7 +1273,7 @@ function TabApresentacao({user, setTab, toast}) {
 }
 
 // ── ABA CAPTURA DE NF (desktop) ─────────────────────────────────────────────
-function TabCaptura({user, sMap, companies, onAdd, toast}) {
+function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue}) {
   var allSec = user.hasGlobalAccess ? Object.keys(sMap) : user.allowedSectors.filter(function(s){return s!=='TODOS';});
   var fState = useState({setor:'',portador:'',local:'',valor:'',data:new Date().toISOString().split('T')[0],num_nf:'',cod_fornec:'',empresa:'',tipo:'SAÍDA'});
   var f = fState[0]; var setF = fState[1];
@@ -1318,12 +1318,23 @@ function TabCaptura({user, sMap, companies, onAdd, toast}) {
     if(isNaN(val)||val<=0){toast.error('Valor inválido.');return;}
     setLoad(true);
     setTimeout(function(){
-      onAdd({id:uid(),data:f.data.split('-').reverse().join('/'),setor:f.setor,portador:f.portador,
+      var item={id:uid(),data:f.data.split('-').reverse().join('/'),setor:f.setor,portador:f.portador,
         local:(f.local||'ESTABELECIMENTO').toUpperCase(),valor:val,tipo:f.tipo,empresa:f.empresa||'S/A A GAZETA',
         num_nf:f.num_nf,cod_fornec:f.cod_fornec,centro_custo:'',conta_contabil:'',id_datasul:'',
         auditStatus:imgUrl?'aguardando_conferencia':'aguardando_doc_fiscal',
-        iaStatus:'AMARELO',documento_fiscal_url:imgUrl||undefined,operador_nome:user.name});
-      toast.success('✓ Lançamento registrado!');
+        iaStatus:'AMARELO',documento_fiscal_url:imgUrl||undefined,operador_nome:user.name};
+      if(isMobile && onAddQueue){
+        var qi={id:item.id,setor:item.setor,portador:item.portador,
+          descricao:item.local,status:'pendente',capturedBy:item.operador_nome,
+          timestamp:new Date().toISOString(),aiAlerts:[],irregularidade:false,isAuditing:false,
+          image:imgUrl||null,documento_fiscal_url:imgUrl||null,
+          valor:val,local:item.local,num_nf:f.num_nf,data:item.data,empresa:item.empresa||'S/A A GAZETA',
+          cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''};
+        onAddQueue(qi);
+      } else {
+        onAdd(item);
+        toast.success('✓ Lançamento registrado!');
+      }
       setF({setor:f.setor,portador:f.portador,local:'',valor:'',data:new Date().toISOString().split('T')[0],num_nf:'',cod_fornec:'',empresa:'',tipo:'SAÍDA'});
       setImgUrl(null); setLoad(false);
     },600);
@@ -1408,7 +1419,7 @@ function TabCaptura({user, sMap, companies, onAdd, toast}) {
               border:'1px solid '+(load?C.border:C.green),
               color:load?C.text2:'#fff',padding:'12px',borderRadius:9,
               cursor:load?'not-allowed':'pointer',fontSize:14,fontWeight:700,marginTop:4}},
-            load ? e(React.Fragment,null,e(Spin,{s:16}),' Registrando...') : '✓ Registrar lançamento'
+            load ? e(React.Fragment,null,e(Spin,{s:16}),(isMobile?' Enviando...':(  ' Registrando...'))) : (isMobile?'📥 Enviar para Caixa de Entrada':'✓ Registrar lançamento')
           )
         )
       )
@@ -2281,7 +2292,7 @@ function EditCell({value,onSave,mono}) {
 }
 
 // ── LANÇAMENTO MANUAL ──────────────────────────────────────────────────────────
-function TabLancamento({user,sMap,companies,lanc,onAdd,toast}) {
+function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue}) {
   const dS = (!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'';
   const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''});
   const [fu,setFu] = useState(null);
@@ -2315,11 +2326,37 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast}) {
   }
 
   function handleSubmit() {
-    if(!f.setor||!f.portador||!f.valor||!f.local||!f.cod_fornec||!f.empresa){toast.error('Preencha os campos obrigatórios (*).'); return;}
+    if(!f.setor||!f.portador||!f.valor||!f.local||!f.empresa){toast.error('Preencha os campos obrigatórios (*).'); return;}
+    // No mobile: campos TOTVS não são obrigatórios — vai para Caixa de Entrada
+    if(!isMobile && !f.cod_fornec){toast.error('Preencha o Cód. Fornecedor TOTVS.'); return;}
     setLoad(true);
     setTimeout(()=>{
-      onAdd({id:uid(),data:isoToBR(f.data),setor:f.setor,portador:f.portador,local:f.local.toUpperCase(),valor:parseFloat(f.valor),tipo:f.tipo,empresa:f.empresa,cod_fornec:f.cod_fornec,num_nf:f.num_nf,centro_custo:f.centro_custo,conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,num_requisicao:f.num_requisicao,id_datasul:f.id_datasul,auditStatus:fu?'aguardando_conferencia':'aguardando_doc_fiscal',iaStatus:'AMARELO',documento_fiscal_url:fu||undefined,operador_nome:user.name});
-      toast.success('✓ Lançamento registrado!');
+      var item = {id:uid(),data:isoToBR(f.data),setor:f.setor,portador:f.portador,
+        local:f.local.toUpperCase(),valor:parseFloat(f.valor),tipo:f.tipo,empresa:f.empresa,
+        cod_fornec:f.cod_fornec,num_nf:f.num_nf,centro_custo:f.centro_custo,
+        conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,num_requisicao:f.num_requisicao,
+        id_datasul:f.id_datasul,auditStatus:fu?'aguardando_conferencia':'aguardando_doc_fiscal',
+        iaStatus:'AMARELO',documento_fiscal_url:fu||undefined,operador_nome:user.name};
+      if(isMobile && onAddQueue) {
+        // Mobile → vai para Caixa de Entrada para conferência
+        var queueItem = {
+          id: item.id, setor: item.setor, portador: item.portador,
+          descricao: item.local, status: 'pendente',
+          capturedBy: item.operador_nome||user.name,
+          timestamp: new Date().toISOString(),
+          aiAlerts: [], irregularidade: false, isAuditing: false,
+          image: fu||null, documento_fiscal_url: fu||null,
+          valor: item.valor, local: item.local, num_nf: item.num_nf,
+          data: item.data, empresa: item.empresa,
+          cod_fornec: '', id_datasul: '', centro_custo: '',
+          conta_contabil: '', num_ordem: '', num_requisicao: '',
+        };
+        onAddQueue(queueItem);
+      } else {
+        // Desktop → registra direto no banco
+        onAdd(item);
+        toast.success('✓ Lançamento registrado!');
+      }
       setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''}));
       setFu(null);setAf(new Set());setLoad(false);
     },700);
@@ -4153,7 +4190,7 @@ function App() {
     e('div',{style:{display:'flex',minHeight:'100vh',background:C.bg0}},
       e(Sidebar,{tab,setTab,user,onLogout:()=>{setUser(null);setTab('dashboard');},bc}),
       e('main',{style:{flex:1,minWidth:0,overflowY:'auto',padding:isMobile?'12px 0 80px 0':'22px 28px'}},
-        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:22,flexWrap:'wrap',gap:12}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:isMobile?8:22,flexWrap:'wrap',gap:12}},
           e('div',null,
             !isMobile&&e('h1',{style:{fontSize:20,fontWeight:500}},TITLES[tab]||tab),
             !isMobile&&e('p',{style:{fontSize:12,color:C.text2,marginTop:2}},'Gestão consolidada Rede Gazeta & Datasul 2026 — v8.0 · IA Gemini'),
@@ -4166,9 +4203,9 @@ function App() {
         ),
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
         tab==='apresentacao'&&e(TabManual,{user:user}),
-        tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast}),
+        tab==='captura'&&e(TabCaptura,{user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){setQueue(function(p){return[item,...p];});setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}),
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
-        tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast}),
+        tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){setQueue(function(p){return[item,...p];});setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='import'&&e(TabImport,{onBatchAdd:items=>setLanc(p=>[...items,...p]),sMap,toast}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
