@@ -209,7 +209,7 @@ var FIREBASE_CONFIG = {
   messagingSenderId: "COLE_SEU_MESSAGING_SENDER_ID_AQUI",
   appId:             "COLE_SEU_APP_ID_AQUI",
 };
-var GEMINI_API_KEY = "COLE_SUA_GEMINI_API_KEY_AQUI";
+var GEMINI_API_KEY = "AIzaSyBEOug4VUVqpdD17z863Ki7kwFEz-hmNpY";
 var FIREBASE_OK = false; // muda para true após configurar
 
 function salvarLancamento(item) {
@@ -1518,7 +1518,7 @@ function ScannerModal(props) {
         };
         xhr.onerror=function(){usaTesseract();};
         xhr.send(JSON.stringify({contents:[{parts:[
-          {text:"Extraia os dados desta nota fiscal em texto plano: valor total, data, fornecedor, CNPJ, número da nota. Liste também se há cerveja, vinho, whisky ou cigarro."},
+          {text:"Analise esta nota fiscal/cupom/DANFE e extraia EXATAMENTE:\nVALOR: (valor total pago em reais, formato 999,99)\nDATA: (data do documento, formato DD/MM/AAAA)\nFORNECEDOR: (razão social ou nome do estabelecimento)\nCNPJ: (somente números, 14 dígitos)\nNF: (número da nota/cupom)\nPROIBIDOS: (liste se há cerveja, vinho, whisky, vodka, cigarro, fumo - ou NENHUM)\nResponda APENAS com essas linhas, sem texto extra."},
           {inline_data:{mime_type:"image/jpeg",data:r.result.split(',')[1]}}
         ]}]}));
       } else {
