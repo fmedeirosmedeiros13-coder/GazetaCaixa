@@ -418,11 +418,7 @@ const MOCK_L = [
    num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
    auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
 ];
-const MOCK_Q = [
-  {id:"q1",setor:"ENGENHARIA",portador:"Vinicius Guimaraes",descricao:"Nota combustível gerador",status:"pendente",capturedBy:"Vinicius Guimaraes",timestamp:"2026-05-14T09:12:00",aiAlerts:[],irregularidade:false,isAuditing:false,image:null},
-  {id:"q2",setor:"MARKETING",portador:"Carla Sobreira",descricao:"Almoço com cliente — suspeito",status:"pendente",capturedBy:"Carla Sobreira",timestamp:"2026-05-13T14:30:00",aiAlerts:["BEBIDA ALCOÓLICA"],irregularidade:true,isAuditing:false,image:null},
-  {id:"q3",setor:"MARKETING",portador:"Carla Sobreira",descricao:"Impressão material gráfico Q2",status:"pendente",capturedBy:"Carla Sobreira",timestamp:"2026-05-13T11:05:00",aiAlerts:[],irregularidade:false,isAuditing:false,image:null},
-];
+const MOCK_Q = []; // Queue vazia — dados vêm do Firebase em tempo real
 
 // ── UTILS ──────────────────────────────────────────────────────────────────────
 var AI_LOCK = true;  // campos OCR/IA são somente leitura (GitHub Pages)
@@ -4204,18 +4200,17 @@ function App() {
         if(items.length > 0) setLanc(items);
       }, function(e){ console.error('Lanc listener:', e); });
 
-    // Escutar queue (Caixa de Entrada) em tempo real
+    // Escutar queue (Caixa de Entrada) em tempo real — sem filtro para evitar índice
     var unsubQueue = _db.collection('queue')
-      .where('status', '!=', 'processado')
+      .orderBy('_ts', 'desc')
       .onSnapshot(function(snap){
         var items = [];
-        snap.forEach(function(doc){ items.push(doc.data()); });
-        setQueue(function(prev){
-          // Manter itens locais que ainda não foram ao Firebase
-          var fbIds = items.map(function(i){return i.id;});
-          var soLocal = prev.filter(function(i){return !fbIds.includes(i.id);});
-          return [...items, ...soLocal];
+        snap.forEach(function(doc){
+          var d = doc.data();
+          if(d.status !== 'processado') items.push(d);
         });
+        // Substituir queue completamente com dados do Firebase
+        setQueue(items);
       }, function(e){ console.error('Queue listener:', e); });
 
     } // fim startListeners
