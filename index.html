@@ -3049,9 +3049,13 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
             e('div',{style:{height:140,background:C.bg3,position:'relative',overflow:'hidden',
               display:'flex',alignItems:'center',justifyContent:'center'}},
               (doc.image||doc.documento_fiscal_url)
-                ? e('img',{src:doc.image||doc.documento_fiscal_url,alt:'',
-                    style:{width:'100%',height:'100%',objectFit:'cover'}})
-                : e('span',{style:{fontSize:48,opacity:.3}},'🧾'),
+                ? e('img',{src:doc.image||doc.documento_fiscal_url,alt:'NF',
+                    style:{width:'100%',height:'100%',objectFit:'cover',display:'block'},
+                    onError:function(ev){ev.target.style.display='none';}})
+                : e('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:6,opacity:.5}},
+                    e('span',{style:{fontSize:40}},'🧾'),
+                    e('span',{style:{fontSize:9,color:C.text2,letterSpacing:'.06em',textTransform:'uppercase'}},'Sem imagem')
+                  ),
               e('div',{style:{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(15,23,42,.85),transparent)'}}),
               // Badges
               e('div',{style:{position:'absolute',top:8,left:8,right:8,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
@@ -4239,18 +4243,36 @@ function App() {
   }
 
   function addQueue(item){
-    // Firestore tem limite de 1MB — remover base64 grande da foto antes de salvar
     var fbItem = Object.assign({},item,{_ts: Date.now()});
-    var fbItemSafe = Object.assign({},fbItem);
-    // Se a imagem for base64 muito grande, salvar referência pequena
-    if(fbItemSafe.image && fbItemSafe.image.length > 500000) {
-      fbItemSafe.image = fbItemSafe.image.substring(0,500000); // trunca em 500KB
-    }
-    if(fbItemSafe.documento_fiscal_url && fbItemSafe.documento_fiscal_url.length > 500000) {
-      fbItemSafe.documento_fiscal_url = fbItemSafe.documento_fiscal_url.substring(0,500000);
-    }
-    salvarQueue(fbItemSafe);
-    setQueue(function(p){return[fbItem,...p];}); // local mantém a foto completa
+    // Comprimir imagem para caber no Firestore (limite 1MB por documento)
+    comprimirBase64(fbItem.image||fbItem.documento_fiscal_url, function(imgComprimida){
+      var fbItemSafe = Object.assign({},fbItem,{
+        image: imgComprimida||null,
+        documento_fiscal_url: imgComprimida||null,
+      });
+      salvarQueue(fbItemSafe);
+    });
+    setQueue(function(p){return[fbItem,...p];}); // local mantém foto original
+  }
+
+  function comprimirBase64(base64, callback) {
+    if(!base64){ callback(null); return; }
+    try {
+      var img = new window.Image();
+      img.onload = function(){
+        var canvas = document.createElement('canvas');
+        var MAX = 800;
+        var w = img.width, h = img.height;
+        if(w > MAX){ h = Math.round(h*MAX/w); w = MAX; }
+        if(h > MAX){ w = Math.round(w*MAX/h); h = MAX; }
+        canvas.width = w; canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        callback(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = function(){ callback(base64); };
+      img.src = base64.startsWith('data:') ? base64 : 'data:image/jpeg;base64,'+base64;
+    } catch(e){ callback(base64); }
   }
 
   if(!user) return e(React.Fragment,null,e(Toasts,{toasts,dismiss}),e(LoginScreen,{onLogin:u=>{setUser(u);setTab('dashboard');}}));
