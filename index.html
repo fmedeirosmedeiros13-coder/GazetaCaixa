@@ -967,27 +967,45 @@ function MobileCapture(props){
       var defS = defSetor || allSec[0] || '';
       var ports = sMap[defS]||[];
 
+      // Normalizar valor — pode vir como número ou string
+      var valorNum = 0;
+      if(data.valor) {
+        valorNum = typeof data.valor==='number'
+          ? data.valor
+          : parseFloat(String(data.valor).replace(/[^\d,\.]/g,'').replace(',','.')) || 0;
+      }
+
       var st = {
-        valor:  data.valor     ? 'ok' : 'empty',
-        local:  data.fornecedor? 'ok' : 'empty',
-        data:   data.data      ? 'ok' : 'empty',
-        num_nf: data.num_nf   ? 'ok' : 'empty',
+        valor:  valorNum > 0    ? 'ok' : 'empty',
+        local:  data.fornecedor ? 'ok' : 'empty',
+        data:   data.data       ? 'ok' : 'empty',
+        num_nf: data.num_nf     ? 'ok' : 'empty',
+        cnpj:   data.cnpj_fornec? 'ok' : 'empty',
+        chave:  data.chave_acesso&&data.chave_acesso.length===44 ? 'ok' : 'empty',
       };
       setIaSt(st);
 
       setFields(function(p){ return Object.assign({},p,{
-        valor:    data.valor    ? String(data.valor).replace('.',',') : '',
-        local:    data.fornecedor ? data.fornecedor.toUpperCase() : '',
-        data:     data.data     || new Date().toLocaleDateString('pt-BR'),
-        num_nf:   data.num_nf   || '',
+        valor:    valorNum > 0   ? String(valorNum).replace('.',',') : '',
+        local:    data.fornecedor? data.fornecedor.toUpperCase()     : '',
+        data:     data.data      ? data.data                         : new Date().toLocaleDateString('pt-BR'),
+        num_nf:   data.num_nf    || '',
+        cnpj:     data.cnpj_fornec || '',
+        chave_acesso: data.chave_acesso || '',
         setor:    defS,
         portador: ports[0]||'',
         empresa:  p.empresa||'S/A A GAZETA',
         tipo:     'SAÍDA',
       });});
 
-      if(data.itens_proibidos && data.itens_proibidos.length > 0)
-        toast.warning('🚫 Itens proibidos: '+data.itens_proibidos.join(', '));
+      // Alerta de itens proibidos
+      if(data.itens_proibidos && data.itens_proibidos.length > 0) {
+        toast.warning('🚫 ITENS PROIBIDOS: '+data.itens_proibidos.join(', ').toUpperCase());
+      }
+
+      // Log de precisão
+      var camposLidos = Object.values(st).filter(function(v){return v==='ok';}).length;
+      console.log('OCR resultado:', camposLidos+'/'+Object.keys(st).length+' campos lidos', data);
 
       setPhase('form');
     });
