@@ -2602,9 +2602,46 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                   setFu(dataUrl);
                   setOcrLoad(true);
                   toast.info('🤖 Lendo com IA Gemini...');
-                  var b64 = dataUrl.replace(/^data:[^;]+;base64,/,'');
-                  console.log('Enviando para OCR... bytes:', b64.length);
-                  geminiOCR(b64, file.type||'image/jpeg', function(data, err){
+                  // Compressão adaptativa: ajusta qualidade e resolução pelo tamanho
+                  (function(){
+                    var srcImg = new Image();
+                    srcImg.onload = function(){
+                      var w=srcImg.naturalWidth, h=srcImg.naturalHeight;
+                      var tamanhoOriginal = dataUrl.length;
+
+                      // Definir MAX e qualidade conforme tamanho original
+                      var MAX, qualidade;
+                      if(tamanhoOriginal < 200000) {
+                        // < 150KB original — sem redimensionar, só qualidade leve
+                        MAX = Math.max(w, h); qualidade = 0.92;
+                      } else if(tamanhoOriginal < 500000) {
+                        // 150-375KB — reduz um pouco
+                        MAX = 1400; qualidade = 0.88;
+                      } else if(tamanhoOriginal < 1000000) {
+                        // 375KB-750KB — reduz moderado
+                        MAX = 1200; qualidade = 0.82;
+                      } else if(tamanhoOriginal < 2000000) {
+                        // 750KB-1.5MB — reduz bastante
+                        MAX = 1000; qualidade = 0.75;
+                      } else {
+                        // > 1.5MB — compressão máxima
+                        MAX = 800; qualidade = 0.65;
+                      }
+
+                      var r = Math.min(MAX/w, MAX/h, 1);
+                      var cv = document.createElement('canvas');
+                      cv.width  = Math.round(w*r);
+                      cv.height = Math.round(h*r);
+                      var ctx = cv.getContext('2d');
+                      ctx.imageSmoothingEnabled = true;
+                      ctx.imageSmoothingQuality = 'high';
+                      ctx.drawImage(srcImg, 0, 0, cv.width, cv.height);
+                      var comp = cv.toDataURL('image/jpeg', qualidade);
+                      var b64  = comp.replace(/^data:[^;]+;base64,/,'');
+                      console.log('OCR compressão: '+cv.width+'x'+cv.height+
+                        ' q='+qualidade+' — '+Math.round(b64.length/1024)+'KB'+
+                        ' (era '+Math.round(tamanhoOriginal/1024)+'KB)');
+                      geminiOCR(b64, 'image/jpeg', function(data, err){
                     setOcrLoad(false);
                     console.log('OCR resposta:', JSON.stringify(data), 'err:', err);
                     if(err){ toast.error('OCR falhou: '+(err.message||err)); return; }
@@ -2632,6 +2669,13 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                       toast.success('✅ IA leu '+a.size+' campo(s)!');
                     }
                   });
+                    };
+                    srcImg.onerror=function(){
+                      var b64=dataUrl.replace(/^data:[^;]+;base64,/,'');
+                      geminiOCR(b64,file.type||'image/jpeg',function(){});
+                    };
+                    srcImg.src=dataUrl;
+                  })();
                 };
                 reader.readAsDataURL(file);
               }
