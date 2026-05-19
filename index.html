@@ -1453,12 +1453,16 @@ function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue})
         e(CardHdr,{title:'Documento fiscal',icon:'📷',sub:'Foto, scan ou arquivo PDF'}),
         e('div',{style:{padding:16}},
           e('input',{type:'file',ref:fileRef,accept:'image/*,application/pdf',onChange:handleFile,style:{display:'none'}}),
-          e('div',{style:{minHeight:220,background:C.bg3,borderRadius:10,border:'2px dashed '+C.border,
-            display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12,overflow:'hidden',cursor:'pointer'},
+          e('div',{style:{minHeight:180,maxHeight:320,background:C.bg3,borderRadius:10,
+            border:'2px dashed '+C.border,display:'flex',alignItems:'center',
+            justifyContent:'center',marginBottom:12,overflow:'auto',cursor:'pointer',
+            position:'relative'},
             onClick:function(){if(fileRef.current)fileRef.current.click();}},
             imgUrl
-              ? e('img',{src:imgUrl,alt:'NF',style:{maxWidth:'100%',maxHeight:280,
-                  objectFit:'contain',borderRadius:8,display:'block',margin:'0 auto'}})
+              ? e('img',{src:imgUrl,alt:'NF',style:{
+                  maxWidth:'100%',maxHeight:300,width:'auto',height:'auto',
+                  objectFit:'contain',borderRadius:8,display:'block',margin:'0 auto',
+                  transform:'none'}})
               : e('div',{style:{textAlign:'center',color:C.text2}},
                   e('div',{style:{fontSize:48,marginBottom:10,opacity:.3}},'🧾'),
                   e('div',{style:{fontSize:13,fontWeight:600,color:C.text1,marginBottom:4}},'Clique para selecionar'),
@@ -1782,8 +1786,9 @@ function ScannerModal(props) {
           e('div',{style:{fontSize:12}},'Lendo documento...')
         ),
         !ocrRunning && imgUrl && e('img',{src:imgUrl,alt:'doc',
-          style:{maxWidth:'100%',maxHeight:400,objectFit:'contain',
-            borderRadius:6,display:'block',margin:'0 auto'}}),
+          style:{maxWidth:'100%',maxHeight:380,width:'auto',height:'auto',
+            objectFit:'contain',borderRadius:6,display:'block',margin:'0 auto',
+            transform:'none'}}),
         !ocrRunning && !imgUrl && e('div',{style:{textAlign:'center',color:C.text2}},
           e('div',{style:{fontSize:48,marginBottom:12,opacity:.2}},'🧾'),
           e('div',{style:{fontSize:13}},'Nenhum documento anexado'),
@@ -2423,15 +2428,43 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
     const file=ev.target.files?.[0]; if(!file) return;
     const r=new FileReader();
     r.onloadend=()=>{
-      setFu(r.result);
-      toast.success('Documento anexado! Simulando OCR...');
-      setTimeout(()=>{
-        const a=new Set();
-        if(!f.valor){upd('valor','152.90');a.add('valor');}
-        if(!f.local){upd('local','POSTO SHELL LTDA');a.add('local');}
-        if(!f.num_nf){upd('num_nf','497481');a.add('num_nf');}
-        setAf(a);toast.success('✨ Campos preenchidos pelo OCR!');
-      },900);
+      var dataUrl = r.result;
+      setFu(dataUrl);
+      // Chamar OCR real via Gemini
+      toast.info('🤖 Lendo documento com IA Gemini...');
+      var mimeType = file.type||'image/jpeg';
+      var b64 = dataUrl.replace(/^data:[^;]+;base64,/,'');
+      geminiOCR(b64, mimeType, function(data, err){
+        if(err){ toast.error('OCR: '+(err.message||'Falha na leitura')); return; }
+        if(data.error){ toast.error('Gemini: '+data.error); return; }
+        var a = new Set();
+        var valorNum = 0;
+        if(data.valor) {
+          valorNum = typeof data.valor==='number'
+            ? data.valor
+            : parseFloat(String(data.valor).replace(/[^\d,\.]/g,'').replace(',','.')) || 0;
+        }
+        if(valorNum > 0){ upd('valor', String(valorNum).replace('.',',')); a.add('valor'); }
+        if(data.fornecedor){ upd('local', data.fornecedor.toUpperCase()); a.add('local'); }
+        if(data.data){
+          // Converter DD/MM/AAAA para YYYY-MM-DD (formato do input date)
+          var dp = data.data.split('/');
+          if(dp.length===3 && dp[2].length===4) {
+            upd('data', dp[2]+'-'+dp[1].padStart(2,'0')+'-'+dp[0].padStart(2,'0'));
+            a.add('data');
+          }
+        }
+        if(data.num_nf){ upd('num_nf', String(data.num_nf)); a.add('num_nf'); }
+        if(data.cnpj_fornec){ upd('cnpj', data.cnpj_fornec); }
+        if(data.chave_acesso && data.chave_acesso.length===44){ upd('chave_acesso', data.chave_acesso); }
+        setAf(a);
+        if(data.itens_proibidos && data.itens_proibidos.length > 0) {
+          toast.warning('🚫 ITENS PROIBIDOS: '+data.itens_proibidos.join(', ').toUpperCase());
+        } else {
+          var lidos = a.size;
+          toast.success('✅ IA leu '+lidos+' campo(s) do documento!');
+        }
+      });
     };
     r.readAsDataURL(file);
   }
