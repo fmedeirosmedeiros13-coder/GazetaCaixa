@@ -442,6 +442,43 @@ const hasAcc = (user,setor) => { if(!user) return false; if(user.hasGlobalAccess
 // ── Gemini OCR via Cloudflare Worker (sem CORS) ──────────────────────────
 var WORKER_URL = 'https://gemini-proxy.fmedeirosmedeiros13.workers.dev';
 
+// Processa extrato bancário via IA Gemini
+function geminiExtrato(textoExtrato, sMap, callback) {
+  var linhas = Object.entries(sMap).map(function(e){ return '- '+e[0]+': '+e[1].join(', '); });
+  var mapa = linhas.join('\n');
+  var prompt = [
+    'Aja como um extrator de dados bancários Banestes.',
+    'TRANSFORME O TEXTO EM JSON.',
+    'MAPEAMENTO DE SETORES (SEMPRE SIGA):',
+    mapa,
+    '',
+    'REGRAS:',
+    '- DATA: Formato DD/MM/AAAA.',
+    '- TIPO: ENTRADA para saques/reforcos/creditos, SAIDA para pagamentos/compras/debitos.',
+    '- ESTABELECIMENTO: Limpe o nome, remova codigos e prefixos como JIM.COM*, PIX*, DEB.',
+    '- Retorne APENAS JSON com array lancamentos onde cada item tem: data, valor, local, tipo, setor, portador.',
+    '- NUNCA invente portadores que nao estao no mapeamento.',
+    '- Se nao identificar o setor, use setor=NAO IDENTIFICADO e portador vazio.',
+    '',
+    'EXTRATO:',
+    textoExtrato,
+    '',
+    'Retorne SOMENTE JSON: {"lancamentos":[{"data":"","valor":0,"local":"","tipo":"SAIDA","setor":"","portador":""}]}'
+  ].join('\n');
+
+  fetch(WORKER_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({texto: textoExtrato, prompt: prompt, modo: 'extrato'})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if(data.error) { callback(null, new Error(data.error)); return; }
+    callback(data, null);
+  })
+  .catch(function(err){ callback(null, err); });
+}
+
 function geminiOCR(base64Image, mimeType, callback) {
   var b64 = base64Image.replace(/^data:[^;]+;base64,/, '');
   fetch(WORKER_URL, {
