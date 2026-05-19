@@ -1457,7 +1457,8 @@ function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue})
             display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12,overflow:'hidden',cursor:'pointer'},
             onClick:function(){if(fileRef.current)fileRef.current.click();}},
             imgUrl
-              ? e('img',{src:imgUrl,alt:'NF',style:{maxWidth:'100%',maxHeight:240,objectFit:'contain',borderRadius:8}})
+              ? e('img',{src:imgUrl,alt:'NF',style:{maxWidth:'100%',maxHeight:280,
+                  objectFit:'contain',borderRadius:8,display:'block',margin:'0 auto'}})
               : e('div',{style:{textAlign:'center',color:C.text2}},
                   e('div',{style:{fontSize:48,marginBottom:10,opacity:.3}},'🧾'),
                   e('div',{style:{fontSize:13,fontWeight:600,color:C.text1,marginBottom:4}},'Clique para selecionar'),
@@ -1771,16 +1772,18 @@ function ScannerModal(props) {
 
   return e('div',{style:{display:'flex',minHeight:440}},
     // Painel esquerdo: imagem
-    e('div',{style:{flex:1,background:'#000',borderRight:'1px solid '+C.border,
+    e('div',{style:{flex:'0 0 380px',background:'#000',borderRight:'1px solid '+C.border,
       display:'flex',flexDirection:'column',position:'relative',overflow:'hidden'}},
-      e('div',{style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
+      e('div',{style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',
+        padding:16,minHeight:300,overflow:'hidden'}},
         ocrRunning && e('div',{style:{textAlign:'center',color:C.blue}},
           e('div',{style:{width:40,height:40,border:'3px solid '+C.border,borderTopColor:C.blue,
             borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 12px'}}),
           e('div',{style:{fontSize:12}},'Lendo documento...')
         ),
         !ocrRunning && imgUrl && e('img',{src:imgUrl,alt:'doc',
-          style:{maxWidth:'100%',maxHeight:360,objectFit:'contain',borderRadius:6}}),
+          style:{maxWidth:'100%',maxHeight:400,objectFit:'contain',
+            borderRadius:6,display:'block',margin:'0 auto'}}),
         !ocrRunning && !imgUrl && e('div',{style:{textAlign:'center',color:C.text2}},
           e('div',{style:{fontSize:48,marginBottom:12,opacity:.2}},'🧾'),
           e('div',{style:{fontSize:13}},'Nenhum documento anexado'),
@@ -4677,14 +4680,18 @@ function App() {
       var img = new window.Image();
       img.onload = function(){
         var canvas = document.createElement('canvas');
-        var MAX = 800;
-        var w = img.width, h = img.height;
-        if(w > MAX){ h = Math.round(h*MAX/w); w = MAX; }
-        if(h > MAX){ w = Math.round(w*MAX/h); h = MAX; }
-        canvas.width = w; canvas.height = h;
+        var MAX = 1024; // aumentar para manter qualidade
+        var w = img.naturalWidth || img.width;
+        var h = img.naturalHeight || img.height;
+        // Manter proporção SEMPRE — nunca distorcer
+        var ratio = Math.min(MAX/w, MAX/h, 1); // nunca ampliar
+        canvas.width  = Math.round(w * ratio);
+        canvas.height = Math.round(h * ratio);
         var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        callback(canvas.toDataURL('image/jpeg', 0.7));
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        callback(canvas.toDataURL('image/jpeg', 0.75));
       };
       img.onerror = function(){ callback(base64); };
       img.src = base64.startsWith('data:') ? base64 : 'data:image/jpeg;base64,'+base64;
