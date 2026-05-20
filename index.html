@@ -1252,17 +1252,8 @@ function MobileCapture(props){
             style:{background:'transparent',border:'none',borderBottom:'2px solid '+(iaSt.valor==='ok'?'#10b981':iaSt.valor==='empty'?'#ef4444':'#334155'),color:iaSt.valor==='ok'?'#10b981':iaSt.valor==='empty'?'#ef4444':'#f0f4ff',fontSize:34,fontWeight:800,width:'100%',textAlign:'center',padding:'4px 0',outline:'none',fontFamily:"'IBM Plex Mono',monospace",transition:'all .3s'}})
         ),
 
-        // ID Datasul + Cód Fornecedor
-        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
-          fld('cod_fornec','🔗 Cód. Forn. TOTVS',
-            e('input',{value:fields.cod_fornec,onChange:function(ev){var v=ev.target.value;setFields(function(p){return Object.assign({},p,{cod_fornec:v});});},
-              placeholder:'Obrigatório',inputMode:'numeric',style:Object.assign({},inputSt('cod_fornec'),{borderColor:'#f59e0b',color:'#f59e0b'})})
-          ),
-          fld('id_datasul','🗄️ ID Datasul',
-            e('input',{value:fields.id_datasul||'',onChange:function(ev){var v=ev.target.value;setFields(function(p){return Object.assign({},p,{id_datasul:v});});},
-              placeholder:'Ex: DS-00123',style:Object.assign({},inputSt('id_datasul'),{opacity:.7})})
-          )
-        ),
+        // Cód. Fornecedor TOTVS — só aparece no desktop (Caixa de Entrada)
+        // ID Datasul — Fase 4 TOTVS, não exibido no mobile
 
         // Foto miniatura + trocar
         e('div',{style:{display:'flex',alignItems:'center',gap:12,background:'#0f172a',border:'1px solid #1e3050',borderRadius:10,padding:'10px 14px'}},
@@ -2578,7 +2569,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           e(FI,{label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
           e(FI,{label:'Cód. fornecedor TOTVS *',k:'cod_fornec',placeholder:'Obrigatório',required:true,hi:!f.cod_fornec}),
           e(FI,{label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
-          e(FI,{label:'ID Datasul',k:'id_datasul',placeholder:'Ex: DS-00123',mono:true}),
+          /* ID Datasul — Fase 4 TOTVS */
           e(FI,{label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
           e(FI,{label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
           e(FI,{label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
