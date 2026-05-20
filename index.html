@@ -421,7 +421,7 @@ const MOCK_L = [
 const MOCK_Q = []; // Queue vazia — dados vêm do Firebase em tempo real
 
 // ── UTILS ──────────────────────────────────────────────────────────────────────
-var AI_LOCK = true;  // campos OCR/IA são somente leitura (GitHub Pages)
+var AI_LOCK = false; // campos OCR/IA são editáveis — borda azul é só indicativo
 
 const uid = () => Math.random().toString(36).slice(2,9)+'-'+Date.now();
 const fmt = n => (n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
