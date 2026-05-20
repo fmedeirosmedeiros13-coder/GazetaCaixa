@@ -2607,23 +2607,20 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                       var w=srcImg.naturalWidth, h=srcImg.naturalHeight;
                       var tamanhoOriginal = dataUrl.length;
 
-                      // Definir MAX e qualidade conforme tamanho original
+                      // Detectar se é DANFE (paisagem) ou cupom (retrato)
+                      var isLandscape = w > h * 1.2;
+
+                      // Compressão adaptativa com limite absoluto de 150KB no output
                       var MAX, qualidade;
-                      if(tamanhoOriginal < 200000) {
-                        // < 150KB original — sem redimensionar, só qualidade leve
-                        MAX = Math.max(w, h); qualidade = 0.92;
+                      if(isLandscape) {
+                        // DANFE em paisagem — compressão máxima
+                        MAX = 900; qualidade = 0.65;
+                      } else if(tamanhoOriginal < 200000) {
+                        MAX = Math.max(w, h); qualidade = 0.88;
                       } else if(tamanhoOriginal < 500000) {
-                        // 150-375KB — reduz um pouco
-                        MAX = 1400; qualidade = 0.88;
-                      } else if(tamanhoOriginal < 1000000) {
-                        // 375KB-750KB — reduz moderado
-                        MAX = 1200; qualidade = 0.82;
-                      } else if(tamanhoOriginal < 2000000) {
-                        // 750KB-1.5MB — reduz bastante
-                        MAX = 1000; qualidade = 0.75;
+                        MAX = 1000; qualidade = 0.80;
                       } else {
-                        // > 1.5MB — compressão máxima
-                        MAX = 800; qualidade = 0.65;
+                        MAX = 800; qualidade = 0.70;
                       }
 
                       var r = Math.min(MAX/w, MAX/h, 1);
@@ -2636,6 +2633,16 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                       ctx.drawImage(srcImg, 0, 0, cv.width, cv.height);
                       var comp = cv.toDataURL('image/jpeg', qualidade);
                       var b64  = comp.replace(/^data:[^;]+;base64,/,'');
+                      // Segunda passagem se ainda > 150KB
+                      if(b64.length > 150000) {
+                        var cv2 = document.createElement('canvas');
+                        var fator = Math.sqrt(150000/b64.length);
+                        cv2.width  = Math.round(cv.width*fator);
+                        cv2.height = Math.round(cv.height*fator);
+                        cv2.getContext('2d').drawImage(cv, 0, 0, cv2.width, cv2.height);
+                        comp = cv2.toDataURL('image/jpeg', 0.65);
+                        b64  = comp.replace(/^data:[^;]+;base64,/,'');
+                      }
                       console.log('OCR compressão: '+cv.width+'x'+cv.height+
                         ' q='+qualidade+' — '+Math.round(b64.length/1024)+'KB'+
                         ' (era '+Math.round(tamanhoOriginal/1024)+'KB)');
