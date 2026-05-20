@@ -2574,7 +2574,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           e(FI,{label:'Data',k:'data',type:'date'}),
           e(Fld,{label:'Portador *'},e(SI,{value:f.portador,onChange:v=>upd('portador',v),options:ports,disabled:!f.setor})),
           e(Fld,{label:'Tipo'},e(SI,{value:f.tipo,onChange:v=>upd('tipo',v),options:[{value:'SAÍDA',label:'SAÍDA (Pagamento/NF)'},{value:'ENTRADA',label:'ENTRADA (Saque/Reforço)'}]})),
-          e(FI,{label:'Valor (R$)',k:'valor',type:'number',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
+          e(FI,{label:'Valor (R$)',k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
           e(FI,{label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
           e(FI,{label:'Cód. fornecedor TOTVS *',k:'cod_fornec',placeholder:'Obrigatório',required:true,hi:!f.cod_fornec}),
           e(FI,{label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
@@ -2648,15 +2648,25 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                     // Normalizar valor — número decimal para string BR
                     var vNum = 0;
                     if(data && data.valor !== undefined && data.valor !== null){
-                      vNum = typeof data.valor==='number'
-                        ? data.valor
-                        : parseFloat(String(data.valor).replace(/[^0-9.]/g,'')) || 0;
+                      var vStr = String(data.valor).trim();
+                      // Gemini pode retornar 72.69 ou 72,69 ou "R$ 72,69"
+                      vStr = vStr.replace(/[^0-9.,]/g,''); // remove R$, espaços
+                      // Se tem vírgula como decimal (72,69) → converte
+                      if(/^\d+,\d{2}$/.test(vStr)) vStr = vStr.replace(',','.');
+                      // Se tem ponto como milhar (1.234,56) → remove ponto e converte vírgula
+                      if(/^\d{1,3}(\.\d{3})+,\d{2}$/.test(vStr)) vStr = vStr.replace(/\./g,'').replace(',','.');
+                      vNum = parseFloat(vStr) || 0;
                     }
                     console.log('OCR campos:', 'valor='+vNum, 'fornecedor='+data.fornecedor, 'data='+data.data, 'num_nf='+data.num_nf);
 
                     // Calcular novos valores e campos lidos
                     var novoF = {};
-                    if(vNum > 0){ novoF.valor = String(vNum).replace('.',','); a.add('valor'); }
+                    if(vNum > 0){
+                      // Formatar como BR: 72.69 → "72,69"
+                      var partes = vNum.toFixed(2).split('.');
+                      novoF.valor = partes[0]+','+(partes[1]||'00');
+                      a.add('valor');
+                    }
                     if(data.fornecedor){ novoF.local = data.fornecedor.toUpperCase(); a.add('local'); }
                     if(data.data){
                       var dp = data.data.split('/');
