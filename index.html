@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-<!-- saved from url=(0060)file:///C:/Users/Fabio/Downloads/GazetaCaixa_v3_Final_5.html -->
-<html lang="pt-BR"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Rede Gazeta — Controle de Caixa v8.0</title>
 <!-- Firebase SDK -->
-<script src="./Rede Gazeta — Controle de Caixa v8.0_files/firebase-app-compat.js.download"></script>
-<script src="./Rede Gazeta — Controle de Caixa v8.0_files/firebase-firestore-compat.js.download"></script>
-<script src="./Rede Gazeta — Controle de Caixa v8.0_files/react.production.min.js.download"></script>
-<script src="./Rede Gazeta — Controle de Caixa v8.0_files/react-dom.production.min.js.download"></script>
-<script src="./Rede Gazeta — Controle de Caixa v8.0_files/xlsx.full.min.js.download"></script>
-<link href="./Rede Gazeta — Controle de Caixa v8.0_files/css2" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
@@ -1794,8 +1794,7 @@ function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue})
             )
           ),
           e(Fld,{label:'Estabelecimento / Fornecedor'},
-            e(TI,{value:f.local,onChange:function(v){upd('local',v.toUpperCase());},ph:'Nome do estabelecimento',uppercase:true})
-          ),
+            e(TI,{value:f.local,onChange:function(v){upd('local',v.toUpperCase());},ph:'Nome do estabelecimento',uppercase:true}) ),
           e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
             e(Fld,{label:'Valor (R$) *',req:true},
               e(TI,{value:f.valor,onChange:function(v){upd('valor',v);},ph:'0,00',mono:true})
@@ -6573,6 +6572,7 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(e(App,null));
 </script>
+</body>
+</html>
 
-
-</body></html>
+         
