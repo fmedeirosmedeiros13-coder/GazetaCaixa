@@ -1703,17 +1703,7 @@ function MobileCapture(props){
             style:{background:'transparent',border:'none',borderBottom:'2px solid '+(iaSt.valor==='ok'?'#10b981':iaSt.valor==='empty'?'#ef4444':'#334155'),color:iaSt.valor==='ok'?'#10b981':iaSt.valor==='empty'?'#ef4444':'#f0f4ff',fontSize:34,fontWeight:800,width:'100%',textAlign:'center',padding:'4px 0',outline:'none',fontFamily:"'IBM Plex Mono',monospace",transition:'all .3s'}})
         ),
 
-        // ID Datasul + Cód Fornecedor
-        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
-          fld('cod_fornec','🔗 Cód. Forn. TOTVS',
-            e('input',{value:fields.cod_fornec,onChange:function(ev){var v=ev.target.value;setFields(function(p){return Object.assign({},p,{cod_fornec:v});});},
-              placeholder:'Obrigatório',inputMode:'numeric',style:Object.assign({},inputSt('cod_fornec'),{borderColor:'#f59e0b',color:'#f59e0b'})})
-          ),
-          fld('id_datasul','🗄️ ID Datasul',
-            e('input',{value:fields.id_datasul||'',onChange:function(ev){var v=ev.target.value;setFields(function(p){return Object.assign({},p,{id_datasul:v});});},
-              placeholder:'Ex: DS-00123',style:Object.assign({},inputSt('id_datasul'),{opacity:.7})})
-          )
-        ),
+        /* Cód. Forn. TOTVS oculto no celular — visível só no desktop */
 
         // Foto miniatura + trocar
         e('div',{style:{display:'flex',alignItems:'center',gap:12,background:'#0f172a',border:'1px solid #1e3050',borderRadius:10,padding:'10px 14px'}},
@@ -1995,13 +1985,12 @@ function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue})
                 style:{width:'100%',background:C.bg3,border:'1px solid '+C.border,borderRadius:7,padding:'8px 10px',color:C.text0,fontSize:13}})
             )
           ),
-          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+          e('div',{style:{display:'grid',gridTemplateColumns:'1fr',gap:10}},
             e(Fld,{label:'Nº Doc / NF'},
               e(TI,{value:f.num_nf,onChange:function(v){upd('num_nf',v);},ph:'Número da nota'})
-            ),
-            e(Fld,{label:'Cód. Fornecedor TOTVS'},
-              e(TI,{value:f.cod_fornec,onChange:function(v){upd('cod_fornec',v);},ph:'Código TOTVS',mono:true})
             )
+            /* Cód. Forn. TOTVS oculto no celular - visível só no desktop */
+            /* ID Datasul oculto - Fase 4 */
           ),
           e('button',{onClick:submit,disabled:load,
             style:{width:'100%',background:load?C.bg3:'linear-gradient(135deg,#065f46,#10b981)',
@@ -3021,7 +3010,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
   function handleSubmit() {
     if(!f.setor||!f.portador||!f.valor||!f.local||!f.empresa){toast.error('Preencha os campos obrigatórios (*).'); return;}
     // No mobile: campos TOTVS não são obrigatórios — vai para Caixa de Entrada
-    if(!isMobile && !f.cod_fornec){toast.error('Preencha o Cód. Fornecedor TOTVS.'); return;}
+    /* validação cod_fornec desativada - campo oculto até integração TOTVS */
     setLoad(true);
     setTimeout(()=>{
       var item = {id:uid(),data:isoToBR(f.data),setor:f.setor,portador:f.portador,
@@ -3152,9 +3141,9 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           e(Fld,{label:'Tipo'},e(SI,{value:f.tipo,onChange:v=>upd('tipo',v),options:[{value:'SAÍDA',label:'SAÍDA (Pagamento/NF)'},{value:'ENTRADA',label:'ENTRADA (Saque/Reforço)'}]})),
           e(FI,{label:'Valor (R$)',k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
           e(FI,{label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
-          e(FI,{label:'Cód. fornecedor TOTVS *',k:'cod_fornec',placeholder:'Obrigatório',required:true,hi:!f.cod_fornec}),
+          e(FI,{label:'Cód. Fornecedor TOTVS',k:'cod_fornec',placeholder:'Ex: 92.130',mono:true}),
           e(FI,{label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
-          e(FI,{label:'ID Datasul',k:'id_datasul',placeholder:'Ex: DS-00123',mono:true}),
+/* ID Datasul - oculto até integração TOTVS */
           e(FI,{label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
           e(FI,{label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
           e(FI,{label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
@@ -3941,9 +3930,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
               e(Fld,{label:'Cód. Fornecedor TOTVS'},
                 e(TI,{value:f.cod_fornec,onChange:v=>upd('cod_fornec',v),placeholder:'Ex: 5929',mono:true})
               ),
-              e(Fld,{label:'ID Datasul'},
-                e(TI,{value:f.id_datasul,onChange:v=>upd('id_datasul',v),placeholder:'Ex: DS-00123',mono:true})
-              ),
+              /* ID Datasul - oculto até integração TOTVS (Fase 4) */
               e(Fld,{label:'Centro de Custo'},
                 e(TI,{value:f.centro_custo,onChange:v=>upd('centro_custo',v),placeholder:'Ex: 210101',mono:true})
               ),
@@ -5239,7 +5226,7 @@ function TabMovimentacao({lanc,user,sMap,toast}) {
       e(CardHdr,{title:'Movimentação — '+eff,icon:'📋'}),
       e('div',{style:{overflowX:'auto'}},
         e('table',null,
-          e('thead',null,e('tr',null,e(TH,null,'Data'),e(TH,null,'ID Datasul'),e(TH,null,'Nº NF'),e(TH,null,'Fornecedor'),e(TH,null,'C. Custo'),e(TH,null,'Cta Contábil'),e(TH,{right:true},'Valor'),e(TH,null,'Status'))),
+          e('thead',null,e('tr',null,e(TH,null,'Data'),/* col ID Datasul oculta - Fase 4 */e(TH,null,'Nº NF'),e(TH,null,'Fornecedor'),e(TH,null,'C. Custo'),e(TH,null,'Cta Contábil'),e(TH,{right:true},'Valor'),e(TH,null,'Status'))),
           e('tbody',null,
             entradas.length>0&&e('tr',null,e('td',{colSpan:8,style:{padding:'7px 14px',background:C.green+'11',color:C.green,fontSize:10,fontWeight:600,textTransform:'uppercase'}},'Entradas — Saques / Reforços')),
             ...entradas.map(item=>e('tr',{key:item.id,style:{borderBottom:'1px solid '+C.border+'22'}},
@@ -5903,7 +5890,7 @@ function TabManual({user, lanc}) {
       e('p',{style:mS.body},'Para registrar despesas diretamente, sem fotografia.'),
       [['1','Acesse "Lançamento manual" no menu','Sidebar (desktop) ou botão "+" na barra inferior (mobile).'],
        ['2','Preencha os campos obrigatórios','Setor, Portador, Empresa, Tipo, Fornecedor, Valor e Data.'],
-       ['3','Preencha os campos TOTVS','Nº NF, Cód. Forn. TOTVS, ID Datasul, Centro de Custo, Conta Contábil.'],
+       ['3','Preencha os campos TOTVS','Nº NF, Cód. Forn. TOTVS, Centro de Custo, Conta Contábil.'],
        ['4','Anexe o documento fiscal','Clique na área de upload. A IA lerá e preencherá automaticamente.'],
        ['5','Clique em "Sincronizar lançamento"','O lançamento é registrado no Banco de Dados.'],
       ].map(function(s){return e(Step,{key:s[0],num:s[0],title:s[1],body:s[2]});}),
@@ -5926,7 +5913,7 @@ function TabManual({user, lanc}) {
       e('h2',{style:mS.h2},'Como conferir um documento'),
       [['1','Clique no card do documento','A tela de conferência abre com a foto à esquerda e campos à direita.'],
        ['2','Confira os dados da IA (seção azul)','Verifique Fornecedor, Valor, Data e Nº NF. Corrija se necessário.'],
-       ['3','Preencha os dados TOTVS (seção âmbar)','Cód. Forn. TOTVS, ID Datasul, Centro de Custo, Conta Contábil, Nº Ordem, Nº Requisição.'],
+       ['3','Preencha os dados TOTVS (seção âmbar)','Cód. Forn. TOTVS, Centro de Custo, Conta Contábil, Nº Ordem, Nº Requisição.'],
        ['4','Clique em "Confirmar e registrar"','O documento sai da fila e vai para o Banco de Dados.'],
       ].map(function(s){return e(Step,{key:s[0],num:s[0],title:s[1],body:s[2]});}),
       e(Callout,{type:'danger'},'Documentos com borda vermelha e selo "⚠ IRREGULAR" contêm itens proibidos detectados pela IA. Avalie antes de aprovar.'),
