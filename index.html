@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -6,6 +7,7 @@
 <title>Rede Gazeta — Controle de Caixa v8.0</title>
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -227,16 +229,16 @@ var FIREBASE_CONFIG = {
   appId:             "1:95409640247:web:db62baa4edc37f7518c0b2"
 };
 var GEMINI_API_KEY = ""; // OCR via Cloudflare Worker — chave segura no servidor
-var FIREBASE_OK = true; // Firebase configurado e ativo
+var FIREBASE_OK = true;
 
-// ── Inicialização Firebase ────────────────────────────────────────────────
 var _fbApp = null;
 var _db = null;
+var _auth = null;
 
 function initFirebase() {
   try {
     if(typeof firebase === 'undefined') {
-      console.warn('Firebase SDK ainda não carregou, tentando novamente...');
+      console.warn('Firebase SDK ainda não carregou...');
       return false;
     }
     if(!firebase.apps.length) {
@@ -245,6 +247,7 @@ function initFirebase() {
       _fbApp = firebase.app();
     }
     _db = firebase.firestore();
+    _auth = firebase.auth();
     console.log('Firebase inicializado ✅');
     return true;
   } catch(e) {
@@ -253,11 +256,90 @@ function initFirebase() {
   }
 }
 
+// ── Auth: login via Firebase Auth com fallback para modo local ──
+function firebaseLogin(email, password, callback) {
+  if(!_auth) {
+    callback({error: 'Firebase Auth não inicializado. Usando modo local.'});
+    return;
+  }
+  _auth.signInWithEmailAndPassword(email, password)
+    .then(function(cred) {
+      // Buscar perfil do usuário no Firestore
+      _db.collection('users').doc(cred.user.uid).get()
+        .then(function(doc) {
+          if(doc.exists) {
+            var userData = doc.data();
+            userData.uid = cred.user.uid;
+            userData.firebaseAuth = true;
+            callback({user: userData});
+          } else {
+            // Usuário autenticado mas sem perfil no Firestore
+            callback({user: {
+              uid: cred.user.uid,
+              login: cred.user.email,
+              name: cred.user.displayName || cred.user.email.split('@')[0],
+              email: cred.user.email,
+              role: 'OPERADOR',
+              hasGlobalAccess: false,
+              allowedSectors: [],
+              firebaseAuth: true
+            }});
+          }
+        })
+        .catch(function(e) {
+          callback({error: 'Erro ao buscar perfil: ' + e.message});
+        });
+    })
+    .catch(function(e) {
+      var msg = 'Erro de autenticação.';
+      if(e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+        msg = 'Email ou senha incorretos.';
+      } else if(e.code === 'auth/too-many-requests') {
+        msg = 'Muitas tentativas. Aguarde alguns minutos.';
+      } else if(e.code === 'auth/network-request-failed') {
+        msg = 'Sem conexão com a internet.';
+      }
+      callback({error: msg, code: e.code});
+    });
+}
+
+// ── Auth: criar usuário no Firebase Auth ──
+function firebaseCreateUser(email, password, profile, callback) {
+  if(!_auth) { callback({error:'Auth não inicializado'}); return; }
+  _auth.createUserWithEmailAndPassword(email, password)
+    .then(function(cred) {
+      var userData = Object.assign({}, profile, {uid: cred.user.uid, email: email});
+      _db.collection('users').doc(cred.user.uid).set(userData)
+        .then(function() { callback({user: userData}); })
+        .catch(function(e) { callback({error: 'Perfil não salvo: '+e.message}); });
+    })
+    .catch(function(e) {
+      var msg = 'Erro ao criar usuário.';
+      if(e.code === 'auth/email-already-in-use') msg = 'Este email já está cadastrado.';
+      if(e.code === 'auth/weak-password') msg = 'Senha muito fraca (mínimo 6 caracteres).';
+      callback({error: msg});
+    });
+}
+
+// ── Salvar perfil de usuário no Firestore ──
+function salvarUserProfile(uid, data) {
+  if(!_db || !uid) return;
+  _db.collection('users').doc(uid).set(data, {merge: true})
+    .catch(function(e){ console.error('Erro ao salvar perfil:', e); });
+}
+
 // Salvar lançamento no Firestore
 function salvarLancamento(item) {
   if(!_db) return;
   _db.collection('lancamentos').doc(item.id).set(item)
     .catch(function(e){ console.error('Erro ao salvar lançamento:', e); });
+}
+
+// Salvar RD no Firestore
+function salvarRD(rd) {
+  if(!_db) return;
+  _db.collection('rds').doc(rd.id).set(Object.assign({}, rd, {_ts: Date.now()}))
+    .catch(function(e){ console.error('Erro ao salvar RD:', e); });
 }
 
 // Salvar item na fila (Caixa de Entrada)
@@ -375,49 +457,10 @@ const INITIAL_USERS = [
   {login:"financeiro_1",name:"Fábio - Financeiro",role:"ADMIN",position:"Analista Financeiro",email:"fin@gazeta.com",password:"gazeta123",hasGlobalAccess:true,allowedSectors:["TODOS"],defaultCompany:"S/A A GAZETA"},
   {login:"engenharia",name:"Engenharia Vitória",role:"OPERADOR",position:"Coord. Engenharia",email:"eng@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["ENGENHARIA"]},
   {login:"telejornalismo",name:"Telejornalismo",role:"OPERADOR",position:"Redação",email:"telej@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["TELEJORNALISMO"]},
+  {login:"thiago",name:"Thiago Silvares",role:"OPERADOR",position:"Gerente de Rádios",email:"thiago@gazeta.com",password:"gazeta123",hasGlobalAccess:false,allowedSectors:["GERÊNCIA DE RÁDIOS"]},
 ];
 const COMPANIES = ["S/A A GAZETA","TV GAZETA","TV CACHOEIRO","TV NORTE","RD MIX","FM 102","VÍDEO EXPRESS","RD DIFUSORA","RD CIDADÃ","FM LINHARES","RD NOVA GERAÇÃO"];
-const MOCK_L = [
-  // ═══════════════════════════════════════════════════════
-  // PROJETOS E EVENTOS — 4 saques do extrato Banestes
-  // Aguardando NF para prestar conta
-  // ═══════════════════════════════════════════════════════
-  {id:'ext-001',data:'13/05/2026',setor:'PROJETOS E EVENTOS',portador:'Bruno Araujo',
-   local:'SAQUE CARTÃO 13/05/2026',valor:106.49,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Importação extrato'},
-  {id:'ext-002',data:'13/04/2026',setor:'PROJETOS E EVENTOS',portador:'Bruno Araujo',
-   local:'SAQUE CARTÃO 13/04/2026',valor:162.75,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Importação extrato'},
-  {id:'ext-003',data:'31/01/2026',setor:'PROJETOS E EVENTOS',portador:'Bruno Araujo',
-   local:'SAQUE CARTÃO 31/01/2026',valor:372.38,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Importação extrato'},
-  {id:'ext-004',data:'21/04/2026',setor:'PROJETOS E EVENTOS',portador:'Bruno Araujo',
-   local:'SAQUE CARTÃO 21/04/2026',valor:72.69,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Importação extrato'},
-  // ═══════════════════════════════════════════════════════
-  // OUTROS SETORES — exemplos mínimos
-  // ═══════════════════════════════════════════════════════
-  {id:'m3',data:'12/05/2026',setor:'ENGENHARIA',portador:'Vinicius Guimaraes',
-   local:'FERREIRA MATERIAIS ELÉTRICOS',valor:890.00,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'3021',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
-  {id:'m4',data:'11/05/2026',setor:'MARKETING',portador:'Carla Sobreira',
-   local:'GRÁFICA EXPRESSÃO LTDA',valor:1200.00,tipo:'SAÍDA',empresa:'TV GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
-  {id:'m5',data:'10/05/2026',setor:'TELEJORNALISMO',portador:'Bruno Dalvi Rampinelli',
-   local:'AMAZON WEB SERVICES',valor:3530.00,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
-  {id:'m6',data:'09/05/2026',setor:'SUPRIMENTOS',portador:'Zé Lopes',
-   local:'PAPELARIA CENTRAL',valor:340.00,tipo:'SAÍDA',empresa:'S/A A GAZETA',
-   num_nf:'',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
-   auditStatus:'aguardando_doc_fiscal',iaStatus:'AMARELO',operador_nome:'Demo'},
-];
+const MOCK_L = []; // Dados reais vêm do Firebase
 const MOCK_Q = []; // Queue vazia — dados vêm do Firebase em tempo real
 
 // ── MÓDULO RD ─────────────────────────────────────────────────────────────────
@@ -451,27 +494,8 @@ function getProximoNumRD(callback) {
   }
 }
 
-// RDs mock para demonstração
-var MOCK_RDS = [
-  {id:'rd-001', numero:260, setor:'OPERAÇÃO E PROGRAMAÇÃO', portador:'Carlos Gonzaga',
-   empresa:'TV GAZETA', fornecedor:'92.130', centro_custo:'2600', gerencia:'OPERAÇÃO E PROGRAMAÇÃO',
-   especie:'RD', data_emissao:'30/04/2026', observacoes:'Alimentação equipe',
-   status:'aprovado', lancamentos:['m-r1','m-r2'], total:175.56,
-   criado_por:'Carlos Gonzaga', criado_em:'30/04/2026',
-   aprovado_por:'Fábio Nobre', aprovado_em:'02/05/2026', obs_devolucao:''},
-  {id:'rd-002', numero:261, setor:'OPERAÇÃO E PROGRAMAÇÃO', portador:'Carlos Gonzaga',
-   empresa:'TV GAZETA', fornecedor:'92.130', centro_custo:'2470', gerencia:'OPERAÇÃO E PROGRAMAÇÃO',
-   especie:'RD', data_emissao:'30/04/2026', observacoes:'',
-   status:'aprovado', lancamentos:[], total:210.58,
-   criado_por:'Carlos Gonzaga', criado_em:'30/04/2026',
-   aprovado_por:'Fábio Nobre', aprovado_em:'02/05/2026', obs_devolucao:''},
-  {id:'rd-003', numero:268, setor:'ENGENHARIA', portador:'Vinícius',
-   empresa:'TV GAZETA', fornecedor:'92.130', centro_custo:'3800', gerencia:'ENGENHARIA',
-   especie:'RD', data_emissao:'12/05/2026', observacoes:'Material elétrico urgente',
-   status:'enviado', lancamentos:['m3'], total:890.00,
-   criado_por:'Vinícius', criado_em:'12/05/2026',
-   aprovado_por:'', aprovado_em:'', obs_devolucao:''},
-];
+// RDs reais vêm do Firebase
+var MOCK_RDS = [];
 
 // ── UTILS ──────────────────────────────────────────────────────────────────────
 var AI_LOCK = true; // campos preenchidos pelo OCR/IA ficam bloqueados (R10)
@@ -631,15 +655,24 @@ function hashExtrato(texto) {
 var EXTRATOS_IMPORTADOS_KEY = 'gz_extratos_importados';
 function extratoJaImportado(hash) {
   try {
-    var lista = JSON.parse(sessionStorage.getItem(EXTRATOS_IMPORTADOS_KEY)||'[]');
+    // Verificar no localStorage (persiste entre sessões)
+    var lista = JSON.parse(localStorage.getItem(EXTRATOS_IMPORTADOS_KEY)||'[]');
     return lista.includes(hash);
   } catch(e){ return false; }
 }
-function registrarExtrato(hash) {
+function registrarExtrato(hash, info) {
   try {
-    var lista = JSON.parse(sessionStorage.getItem(EXTRATOS_IMPORTADOS_KEY)||'[]');
+    var lista = JSON.parse(localStorage.getItem(EXTRATOS_IMPORTADOS_KEY)||'[]');
     lista.push(hash);
-    sessionStorage.setItem(EXTRATOS_IMPORTADOS_KEY, JSON.stringify(lista));
+    localStorage.setItem(EXTRATOS_IMPORTADOS_KEY, JSON.stringify(lista));
+    // Salvar no Firebase também para proteger em outros navegadores/computadores
+    if(_db) {
+      _db.collection('extratos_importados').doc(hash).set({
+        hash: hash,
+        importado_em: new Date().toISOString(),
+        info: info || '',
+      }).catch(function(){});
+    }
   } catch(e){}
 }
 
@@ -648,14 +681,17 @@ function registrarExtrato(hash) {
 //             CONTA DESTINO, ESTABELECIMENTO, DESCRIÇÃO, VALOR
 function parseBanestsCSV(texto, sMap) {
   var linhas = texto.trim().split(/\r?\n/);
-  // Detectar se é formato Banestes pelo cabeçalho
-  var cab = (linhas[0]||'').toLowerCase();
-  var isBanestes = cab.includes('portador')||cab.includes('cartão')||cab.includes('estabelecimento');
 
-  var resultados = [];
-  var inicio = isBanestes ? 1 : 0;
+  // Mapeamento conta corrente → setor
+  var contaSetor = {};
+  Object.keys(SECTOR_CONTA).forEach(function(setor){
+    var c = SECTOR_CONTA[setor];
+    if(c && c.conta) {
+      contaSetor[c.conta.replace(/[\.\s\-]/g,'')] = setor;
+    }
+  });
 
-  // Mapeamento portador → setor
+  // Mapeamento portador → setor (fallback)
   var portadorSetor = {};
   Object.entries(sMap).forEach(function(e){
     var setor = e[0], ports = e[1];
@@ -664,80 +700,221 @@ function parseBanestsCSV(texto, sMap) {
     });
   });
 
-  for(var i=inicio;i<linhas.length;i++){
-    var linha = linhas[i];
-    if(!linha.trim()) continue;
+  // ── Detectar cabeçalho e mapear posições absolutas das colunas ──────────
+  var inicio = 0;
+  var CI = null;
 
-    // Suporta ; e ,
-    var sep = linha.includes(';') ? ';' : ',';
-    var cols = linha.split(sep).map(function(c){return c.trim().replace(/^"|"$/g,'');});
+  for(var h=0; h<Math.min(linhas.length, 25); h++) {
+    var lh = linhas[h];
+    if(!lh || !lh.trim()) { inicio = h+1; continue; }
+    var lhLow = lh.toLowerCase();
 
-    var data='', portador='', conta='', estabelecimento='', descricao='', valorStr='', tipo='SAÍDA';
-
-    if(isBanestes) {
-      // Formato Banestes: DATA/HORA; PROTOCOLO; Nº CARTÃO; PORTADOR; CONTA CORR; CONTA DEST; ESTABELECIMENTO; DESCRIÇÃO; VALOR
-      var dataHora = cols[0]||'';
-      var partes = dataHora.split(' ');
-      data = partes[0]||''; // DD/MM/AAAA
-      portador = (cols[3]||'').toUpperCase().trim();
-      conta = cols[4]||'';
-      estabelecimento = (cols[6]||cols[5]||'').toUpperCase().trim();
-      descricao = (cols[7]||'').toUpperCase().trim();
-      valorStr = cols[8]||cols[7]||'0';
-
-      // Detectar tipo pela descrição
-      var descLow = descricao.toLowerCase();
-      if(descLow.includes('saque')||descLow.includes('saída')||descLow.includes('saida')||
-         descLow.includes('pagamento')||descLow.includes('compra')||descLow.includes('débito')) {
-        tipo = 'SAÍDA';
-      } else if(descLow.includes('entrada')||descLow.includes('crédito')||descLow.includes('credito')||
-                descLow.includes('transferência recebida')||descLow.includes('reembolso')) {
-        tipo = 'ENTRADA';
-      }
-    } else {
-      // Formato genérico
-      data = cols[0]||'';
-      portador = (cols[2]||'').toUpperCase().trim();
-      estabelecimento = (cols[5]||cols[4]||'').toUpperCase().trim();
-      descricao = (cols[6]||'').toUpperCase().trim();
-      valorStr = cols[cols.length-1]||'0';
+    // Pular metadados do Banestes
+    if(lhLow.indexOf('sistema de admin')>-1 || lhLow.indexOf('relatório de mov')>-1 ||
+       lhLow.indexOf('identificação')>-1 || lhLow.indexOf('identificacao')>-1 ||
+       lhLow.indexOf('cnpj')>-1 || lhLow.indexOf('período')>-1 || lhLow.indexOf('periodo')>-1 ||
+       lhLow.indexOf('conta: todas')>-1 || lhLow.indexOf('conta:')>-1 ||
+       lhLow.indexOf('banco')===0 || lhLow.indexOf('banestes')===0 ||
+       lhLow.indexOf('agência')>-1 || lhLow.indexOf('agencia')>-1 ||
+       lhLow.indexOf('saldo anterior')>-1 || lhLow.indexOf('saldo inicial')>-1 ||
+       lhLow.indexOf('------')>-1 || lhLow.indexOf('======')>-1) {
+      inicio = h+1;
+      continue;
     }
 
-    // Limpar e converter valor
-    var valor = parseFloat(
-      valorStr.replace(/\./g,'').replace(',','.').replace(/[^\d.-]/g,'')
-    );
-    if(isNaN(valor)||valor<=0) continue;
+    // Detectar linha de cabeçalho
+    if(lhLow.indexOf('portador')>-1 && (lhLow.indexOf('valor')>-1 || lhLow.indexOf('estabelecimento')>-1 || lhLow.indexOf('conta')>-1)) {
+      var sep = lh.indexOf('\t')>-1?'\t':(lh.indexOf(';')>-1?';':',');
+      var cabCols = lh.split(sep);
+      CI = {};
+      for(var ci=0; ci<cabCols.length; ci++) {
+        var cc = cabCols[ci].toLowerCase().trim();
+        if(!CI.data       && (cc.indexOf('data')>-1||cc.indexOf('hora')>-1)) CI.data = ci;
+        if(!CI.protocolo  && cc.indexOf('protocolo')>-1) CI.protocolo = ci;
+        if(!CI.cartao     && (cc.indexOf('cartão')>-1||cc.indexOf('cartao')>-1||cc.indexOf('número do')>-1)) CI.cartao = ci;
+        if(!CI.portador   && cc.indexOf('portador')>-1) CI.portador = ci;
+        if(!CI.conta      && cc.indexOf('conta corrente')>-1) CI.conta = ci;
+        if(!CI.contaDest  && cc.indexOf('conta destino')>-1) CI.contaDest = ci;
+        if(!CI.estab      && cc.indexOf('estabelecimento')>-1) CI.estab = ci;
+        if(!CI.desc       && cc.indexOf('descri')>-1) CI.desc = ci;
+        if(!CI.valor      && cc.indexOf('valor')>-1) CI.valor = ci;
+      }
+      // DATA/HORA não aparece no cabeçalho Banestes — fica na col anterior ao PROTOCOLO
+      if(CI.data===undefined && CI.protocolo!==undefined) CI.data = CI.protocolo - 1;
+      if(CI.data===undefined) CI.data = 0;
+      // Detectar offset: testar primeira linha de dados vs posições do CI
+      // No Banestes XLS o cabeçalho tem col[0]=vazio mas os dados não
+      var testIdx = h+1;
+      while(testIdx < linhas.length && !linhas[testIdx].trim()) testIdx++;
+      if(testIdx < linhas.length) {
+        var testCols = linhas[testIdx].split(sep);
+        var portadorEsperado = (testCols[CI.portador]||'').trim();
+        var portadorAntes    = CI.portador>0 ? (testCols[CI.portador-1]||'').trim() : '';
+        // Se a coluna portador está vazia/numérica mas a anterior tem nome de pessoa
+        if((!portadorEsperado || /^\d/.test(portadorEsperado)) &&
+           portadorAntes.length > 5 && /^[A-Z]/.test(portadorAntes)) {
+          // Offset de -1: dados têm 1 col a menos que o cabeçalho
+          Object.keys(CI).forEach(function(k){
+            if(CI[k]!==undefined && CI[k]>0) CI[k] = CI[k]-1;
+          });
+        }
+      }
+      break;
+    }
 
-    // Identificar setor pelo portador
-    var portadorUp = portador.toUpperCase().trim();
-    var setor = portadorSetor[portadorUp] || 'NÃO IDENTIFICADO';
+    // Linha de dados direto (sem cabeçalho encontrado)
+    if(/\d{2}\/\d{2}/.test(lh) && lh.split(/[\t;,]/).length >= 6) {
+      inicio = h;
+      break;
+    }
+  }
 
-    // Limpar estabelecimento
-    var local = estabelecimento||descricao||'ESTABELECIMENTO';
-    local = local.replace(/^(VISAELECTRON|MASTERCARD|PIX\*|DEB\.|JIM\.COM\*)/,'').trim();
+  // ── Converter valor com qualquer formato ────────────────────────────────
+  function parseValor(s) {
+    s = String(s||'').trim();
+    // Remover símbolos de moeda: R$, $, €, etc.
+    s = s.replace(/[R$€£¥\s]/g,'');
+    if(!s) return 0;
+    // Detectar formato: se tem vírgula E ponto → brasileiro (1.234,56) ou americano (1,234.56)
+    var temPonto  = s.indexOf('.')>-1;
+    var temVirgula = s.indexOf(',')>-1;
+    var valor;
+    if(temPonto && temVirgula) {
+      // Qual vem depois? Ex: "1.234,56" → ponto é milhar, vírgula é decimal
+      if(s.lastIndexOf('.')< s.lastIndexOf(',')) {
+        // Brasileiro: 1.234,56
+        valor = parseFloat(s.replace(/\./g,'').replace(',','.'));
+      } else {
+        // Americano: 1,234.56
+        valor = parseFloat(s.replace(/,/g,''));
+      }
+    } else if(temVirgula && !temPonto) {
+      // Pode ser decimal brasileiro (93,36) ou milhar americano (1,234)
+      var partes = s.split(',');
+      if(partes.length===2 && partes[1].length<=2) {
+        // Decimal: 93,36
+        valor = parseFloat(s.replace(',','.'));
+      } else {
+        // Milhar: 1,234
+        valor = parseFloat(s.replace(/,/g,''));
+      }
+    } else if(temPonto && !temVirgula) {
+      // Pode ser decimal americano (93.36) ou milhar brasileiro (1.234)
+      var partes2 = s.split('.');
+      if(partes2.length===2 && partes2[1].length<=2) {
+        // Decimal americano: 93.36 ou 300.00
+        valor = parseFloat(s);
+      } else {
+        // Milhar brasileiro: 1.234
+        valor = parseFloat(s.replace(/\./g,''));
+      }
+    } else {
+      valor = parseFloat(s);
+    }
+    return isNaN(valor) ? 0 : Math.abs(valor);
+  }
+
+  var resultados = [];
+
+  for(var i=inicio; i<linhas.length; i++) {
+    var linha = linhas[i];
+    if(!linha || !linha.trim()) continue;
+
+    var linhaLow = linha.toLowerCase();
+    if(linhaLow.indexOf('saldo final')>-1 || linhaLow.indexOf('total geral')>-1 ||
+       linhaLow.indexOf('saldo disponível')>-1 || linhaLow.indexOf('total de')>-1 ||
+       linhaLow.indexOf('qtd. transações')>-1 || linhaLow.indexOf('------')>-1) continue;
+
+    var sep = linha.indexOf('\t')>-1?'\t':(linha.indexOf(';')>-1?';':',');
+    var cols = linha.split(sep).map(function(c){return c.trim().replace(/^"|"$/g,'');});
+
+    if(cols.length < 4) continue;
+
+    var data='', portador='', cartao='', conta='', estab='', desc='', valorStr='', tipo='SAÍDA';
+
+    if(CI) {
+      var dataRaw = cols[CI.data]||'';
+      var mData   = dataRaw.match(/(\d{2}\/\d{2}(?:\/\d{2,4})?)/);
+      data        = mData ? mData[1] : '';
+      if(data && data.split('/').length===2) data = data+'/'+new Date().getFullYear();
+
+      cartao    = (cols[CI.cartao]   ||'').trim();
+      portador  = (cols[CI.portador] ||'').trim();
+      conta     = (cols[CI.conta]    ||'').replace(/[\.\s]/g,'');
+      estab     = (cols[CI.estab]    ||'').trim();
+      desc      = (cols[CI.desc]     ||'').trim();
+      valorStr  =  cols[CI.valor]    ||'0';
+    } else {
+      // Heurística para formato desconhecido
+      for(var ci2=0; ci2<cols.length; ci2++) {
+        var c2=cols[ci2].trim();
+        if(!data){var mD=c2.match(/(\d{2}\/\d{2}(?:\/\d{2,4})?)/);if(mD){data=mD[1];if(data.split('/').length===2)data+='/'+new Date().getFullYear();continue;}}
+        if(!conta){var cl=c2.replace(/[\.\s]/g,'');if(/^\d{7,10}$/.test(cl)&&contaSetor[cl]){conta=cl;continue;}}
+      }
+      estab    = (cols[cols.length-3]||'').trim();
+      desc     = (cols[cols.length-2]||'').trim();
+      valorStr =  cols[cols.length-1]||'0';
+    }
+
+    var valor = parseValor(valorStr);
+    if(valor<=0 || valor>100000) continue;
+
+    // Identificar setor: 1º conta corrente, 2º portador
+    var setor = contaSetor[conta] || '';
+    if(!setor) {
+      var portUp = portador.toUpperCase().trim();
+      var portKeys = Object.keys(portadorSetor);
+      for(var pk=0; pk<portKeys.length; pk++) {
+        var pkUp=portKeys[pk];
+        if(portUp.indexOf(pkUp)>-1||pkUp.indexOf(portUp.split(' ')[0])>-1){setor=portadorSetor[pkUp];break;}
+      }
+    }
+    if(!setor) setor='NÃO IDENTIFICADO';
+
+    // Tipo
+    var descAll=(desc+' '+estab).toLowerCase();
+    tipo='SAÍDA';
+    if(descAll.indexOf('entrada')>-1||descAll.indexOf('crédito')>-1||
+       descAll.indexOf('estorno')>-1||descAll.indexOf('reembolso')>-1) tipo='ENTRADA';
+
+    // Local limpo
+    var local=(estab||desc||'ESTABELECIMENTO').toUpperCase();
+    local=local.replace(/^(VISA ELECTRON[^\t]*|MASTERCARD[^\t]*|PIX\*|DEB\.)/,'').trim();
+    if(local.length<3) local=(desc||estab||'ESTABELECIMENTO').toUpperCase().trim();
+
+    // ID determinístico: mesma transação = mesmo ID, independente de quando importou
+    // Baseado em: data + conta + valor + descrição
+    function idTransacao(data, conta, valor, desc) {
+      var str = (data||'')+'|'+(conta||'')+'|'+(valor||'')+'|'+(desc||'').substring(0,20);
+      var h = 0;
+      for(var i=0;i<str.length;i++){h=((h<<5)-h)+str.charCodeAt(i);h|=0;}
+      return 'ext_'+Math.abs(h).toString(36);
+    }
 
     if(data && valor>0) {
       resultados.push({
-        id: uid(),
+        id: idTransacao(data, conta, valor, (desc||estab||'').substring(0,20)),
         data: data,
         portador: portador,
+        cartao: cartao,
         conta_banestes: conta,
         setor: setor,
         local: local,
-        descricao_banestes: descricao,
+        descricao_banestes: desc,
         valor: valor,
         tipo: tipo,
         empresa: 'TV GAZETA',
         num_nf:'', cod_fornec:'', centro_custo:'', conta_contabil:'', id_datasul:'',
-        auditStatus: 'aguardando_doc_fiscal',
-        iaStatus: 'AMARELO',
-        operador_nome: 'Importação Banestes',
+        auditStatus:'aguardando_doc_fiscal',
+        iaStatus:'AMARELO',
+        operador_nome:'Importação Banestes',
       });
     }
   }
   return resultados;
 }
+
+var PROIBIDOS_LISTA = {
   alcool:  ['cerveja','chopp','vinho','whisky','whiskey','vodka','cachaça','rum',
              'gin','espumante','champagne','licor','dose','drink'],
   tabaco:  ['cigarro','fumo','tabaco','charuto','narguilé','vape'],
@@ -775,6 +952,8 @@ function validarTipoDocumento(texto) {
   // Tipo desconhecido — alerta mas não bloqueia
   return {valido:null,tipo:'desconhecido',motivo:'Tipo de documento não reconhecido automaticamente. Verifique se é aceito.'};
 }
+
+function auditaItensProibidos(texto) {
   var tLow = (texto||'').toLowerCase();
   var detectados = [];
   var grupos = Object.keys(PROIBIDOS_LISTA);
@@ -831,36 +1010,48 @@ var SECTOR_BANK_DEFAULT = {};
 // ─────────────────────────────────────────────────────────────────────────────
 function calcAportes(lanc, limits, bankInfo, rds) {
   var bank = bankInfo || SECTOR_BANK_DEFAULT;
-  var rdsAprov = (rds||[]).filter(function(r){return r.status==='aprovado';});
+  var rdsAprov = (rds||[]).filter(function(r){return r.status===RD_STATUS.APROVADO;});
+
   return Object.keys(limits).map(function(setor) {
     var items = lanc.filter(function(l){return l.setor===setor;});
 
-    // R5: PC real = RDs aprovados (módulo RD) ou fallback auditStatus
-    var pcRD = rdsAprov.filter(function(r){return r.setor===setor;})
-                       .reduce(function(s,r){return s+r.total;},0);
-    var pcLanc = items.filter(function(l){
-      return l.tipo==='SAÍDA' && (l.auditStatus==='auditado' || l.auditStatus==='conciliado');
-    }).reduce(function(s,l){return s+l.valor;},0);
-    var pc = pcRD > 0 ? pcRD : pcLanc;
+    // R5: PC real = SEMPRE RDs aprovados (todos os setores usam RD)
+    var pc = rdsAprov
+      .filter(function(r){return r.setor===setor;})
+      .reduce(function(s,r){return s+(r.total||0);},0);
 
-    // Saldo físico real: sacado - comprovado (R5)
-    var sacado = items.filter(function(l){return l.tipo==='SAÍDA';})
-                      .reduce(function(s,l){return s+l.valor;},0);
-    var saldoFisicoReal = sacado - pc;
+    // Quantidade de RDs aprovados para este setor
+    var qtdRDs = rdsAprov.filter(function(r){return r.setor===setor;}).length;
 
-    var pendencia = items.filter(function(l){
-      return l.tipo==='SAÍDA' && l.auditStatus!=='auditado' && l.auditStatus!=='conciliado';
-    }).reduce(function(s,l){return s+l.valor;},0);
+    // Saques do extrato Banestes para este setor
+    var sacado = items
+      .filter(function(l){return l.tipo==='SAÍDA';})
+      .reduce(function(s,l){return s+l.valor;},0);
 
-    var totvs = items.filter(function(l){
-      return l.tipo==='SAÍDA' && (l.num_nf || l.id_datasul);
-    }).reduce(function(s,l){return s+l.valor;},0);
+    // Saldo físico real: sacado - PC aprovado (R5)
+    var saldoFisico = sacado - pc;
 
+    // Lançamentos ainda sem RD aprovado vinculado (pendência)
+    var pendencia = sacado - pc;
+
+    // Campos do extrato bancário
     var bk = bank[setor] || {sldInicial:0, saques:0};
     var disponivel = bk.sldInicial + bk.saques;
-    var sldFinal = disponivel - pc;
-    var sldTotvs = disponivel - totvs;
-    var diferenca = sldFinal - sldTotvs;
+    var sldFinal   = disponivel - pc;
+
+    // Status
+    var status;
+    if(qtdRDs === 0 && sacado === 0) {
+      status = 'Sem movimento';
+    } else if(qtdRDs === 0 && sacado > 0) {
+      status = 'Aguardando RD';
+    } else if(saldoFisico < 0) {
+      status = 'Negativo';
+    } else if(pc > 0 && saldoFisico <= 0.01) {
+      status = 'PC OK';
+    } else {
+      status = 'Repor R$ '+fmt(pc);
+    }
 
     return {
       setor:        setor,
@@ -869,18 +1060,18 @@ function calcAportes(lanc, limits, bankInfo, rds) {
       saques:       bk.saques,
       disponivel:   disponivel,
       pc:           pc,
+      qtdRDs:       qtdRDs,
       pendencia:    pendencia,
-      pendencias:   saldoFisicoReal,
+      pendencias:   saldoFisico,
       totalSaidas:  sacado,
       total_gasto:  pc,
-      saldo_caixa:  saldoFisicoReal,
+      saldo_caixa:  saldoFisico,
       sldFinal:     sldFinal,
-      sldTotvs:     sldTotvs,
-      saldo_totvs:  sldTotvs,
-      diferenca:    diferenca,
+      saldo_totvs:  sldFinal,
+      diferenca:    0,
       valor_aporte: pc,
-      status: saldoFisicoReal < 0 ? 'Negativo' : pc > 0 ? 'Repor '+fmt(pc) : pendencia > 0 ? 'Pendente' : 'Caixa OK',
-      obs: diferenca !== 0 ? 'Divergência DATASUL' : '',
+      status:       status,
+      obs:          qtdRDs === 0 && sacado > 0 ? 'Sem RD aprovado' : '',
     };
   });
 }
@@ -1834,20 +2025,71 @@ function LoginScreen({onLogin}) {
   const [rem,setRem] = useState(false);
   const [load,setLoad] = useState(false);
   const [err,setErr] = useState('');
+  const [mode,setMode] = useState('login');
 
   useEffect(()=>{
     try{const s=localStorage.getItem('gz_c');if(s){const p=JSON.parse(s);setLv(p.l);setPv(p.p);setRem(true);}}catch(_){}
   },[]);
 
+  // Verificar se já tem sessão Firebase ativa
+  useEffect(()=>{
+    if(!_auth) return;
+    var unsub = _auth.onAuthStateChanged(function(fbUser){
+      if(fbUser) {
+        _db.collection('users').doc(fbUser.uid).get().then(function(doc){
+          if(doc.exists) {
+            var u = doc.data();
+            u.uid = fbUser.uid;
+            u.firebaseAuth = true;
+            onLogin(u);
+          }
+        }).catch(function(){});
+      }
+    });
+    return function(){ unsub(); };
+  },[]);
+
   function doLogin() {
     if(!lv||!pv){setErr('Preencha usuário e senha.');return;}
     setErr('');setLoad(true);
-    setTimeout(()=>{
-      const u=INITIAL_USERS.find(u=>u.login===lv.toLowerCase().trim()&&u.password===pv);
-      if(u){if(rem)localStorage.setItem('gz_c',JSON.stringify({l:lv,p:pv}));else localStorage.removeItem('gz_c');onLogin(u);}
-      else setErr('Login ou senha incorretos.');
+
+    // 1. Tentar Firebase Auth primeiro (email+senha)
+    var emailToTry = lv.indexOf('@')>-1 ? lv : lv + '@gazeta.com';
+    if(_auth) {
+      firebaseLogin(emailToTry, pv, function(result) {
+        if(result.user) {
+          if(rem) localStorage.setItem('gz_c',JSON.stringify({l:lv,p:pv}));
+          else localStorage.removeItem('gz_c');
+          onLogin(result.user);
+          setLoad(false);
+          return;
+        }
+        // 2. Se Firebase falhou, tentar fallback local
+        fallbackLocal();
+      });
+    } else {
+      fallbackLocal();
+    }
+
+    function fallbackLocal() {
+      var u = INITIAL_USERS.find(function(u){
+        return u.login===lv.toLowerCase().trim()&&u.password===pv;
+      });
+      if(u) {
+        u.firebaseAuth = false;
+        if(rem) localStorage.setItem('gz_c',JSON.stringify({l:lv,p:pv}));
+        else localStorage.removeItem('gz_c');
+        onLogin(u);
+      } else {
+        setErr('Login ou senha incorretos.');
+      }
       setLoad(false);
-    },400);
+    }
+  }
+
+  function doLogout() {
+    if(_auth) _auth.signOut().catch(function(){});
+    localStorage.removeItem('gz_c');
   }
 
   return e('div',{style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg0,padding:16}},
@@ -1858,29 +2100,30 @@ function LoginScreen({onLogin}) {
         e('p',{style:{fontSize:10,color:C.text2,marginTop:3,fontFamily:C.mono}},'CONTROLE DE CAIXA — DATASUL READY')
       ),
       e('div',{style:{display:'flex',flexDirection:'column',gap:14}},
-        e(Fld,{label:'ID de usuário'},e(TI,{value:lv,onChange:setLv,placeholder:'ex: admin'})),
+        e(Fld,{label:'Usuário ou email'},e(TI,{value:lv,onChange:setLv,placeholder:'ex: admin ou admin@gazeta.com'})),
         e(Fld,{label:'Senha de acesso'},
           e('div',{style:{position:'relative'}},
-            e('input',{type:sp?'text':'password',value:pv,onChange:ev=>setPv(ev.target.value),onKeyDown:ev=>ev.key==='Enter'&&doLogin(),placeholder:'••••••••',style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 36px 8px 10px',color:C.text0,width:'100%',fontSize:12}}),
-            e('button',{onClick:()=>setSp(!sp),style:{position:'absolute',right:9,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:C.text2,cursor:'pointer',fontSize:15}},sp?'🙈':'👁️')
+            e('input',{type:sp?'text':'password',value:pv,onChange:function(ev){setPv(ev.target.value);},onKeyDown:function(ev){if(ev.key==='Enter')doLogin();},placeholder:'••••••••',style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 36px 8px 10px',color:C.text0,width:'100%',fontSize:12}}),
+            e('button',{onClick:function(){setSp(!sp);},style:{position:'absolute',right:9,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:C.text2,cursor:'pointer',fontSize:15}},sp?'🙈':'👁️')
           )
         ),
         e('label',{style:{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:11,color:C.text1}},
-          e('input',{type:'checkbox',checked:rem,onChange:ev=>setRem(ev.target.checked)}),
+          e('input',{type:'checkbox',checked:rem,onChange:function(ev){setRem(ev.target.checked);}}),
           'Lembrar meu acesso'
         ),
         err&&e('div',{style:{background:C.redBg,border:'1px solid '+C.red+'44',color:C.red,padding:'9px 12px',borderRadius:6,fontSize:12}},'⚠ '+err),
-        e('button',{onClick:doLogin,disabled:load,style:{background:load?C.bg3:C.blueDim,border:'1px solid '+load?C.border:C.blue,color:load?C.text2:'#fff',padding:'11px',borderRadius:8,fontSize:13,fontWeight:500,cursor:load?'not-allowed':'pointer',marginTop:4,display:'flex',alignItems:'center',justifyContent:'center',gap:8}},
+        e('button',{onClick:doLogin,disabled:load,style:{background:load?C.bg3:C.blueDim,border:'1px solid '+(load?C.border:C.blue),color:load?C.text2:'#fff',padding:'11px',borderRadius:8,fontSize:13,fontWeight:500,cursor:load?'not-allowed':'pointer',marginTop:4,display:'flex',alignItems:'center',justifyContent:'center',gap:8}},
           load?e(React.Fragment,null,e(Spin),' Autenticando...'):'Acessar sistema →'
         )
       ),
       e('div',{style:{marginTop:22,paddingTop:18,borderTop:'1px solid '+C.border,display:'flex',flexDirection:'column',gap:4}},
         e('p',{style:{fontSize:10,color:C.text3,textAlign:'center',marginBottom:4}},'Usuários de demonstração:'),
-        [['admin','nova123','Admin — acesso total'],['wellington','gazeta123','Operador — Eng/Fin/Telej'],['engenharia','gazeta123','Operador — só Engenharia']].map(([l,p,d])=>
-          e('button',{key:l,onClick:()=>{setLv(l);setPv(p);},style:{background:'transparent',border:'1px solid '+C.border,borderRadius:5,padding:'6px 10px',color:C.text2,fontSize:11,cursor:'pointer',textAlign:'left'}},
+        [['admin','nova123','Admin — acesso total'],['thiago','gazeta123','Piloto — Ger. Rádios'],['wellington','gazeta123','Operador — Eng/Fin/Telej'],['engenharia','gazeta123','Operador — só Engenharia']].map(function(arr){
+          var l=arr[0],p=arr[1],d=arr[2];
+          return e('button',{key:l,onClick:function(){setLv(l);setPv(p);},style:{background:'transparent',border:'1px solid '+C.border,borderRadius:5,padding:'6px 10px',color:C.text2,fontSize:11,cursor:'pointer',textAlign:'left'}},
             e('strong',{style:{color:C.blueHi}},l),' ',e('span',{style:{color:C.text3}},'/ '+p+' — '+d)
-          )
-        )
+          );
+        })
       ),
       e('p',{style:{fontSize:10,color:C.text3,textAlign:'center',marginTop:18}},'Rede Gazeta de Comunicações © 2026')
     )
@@ -2566,17 +2809,16 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
         e('table',null,
           e('thead',null,e('tr',null,
             ...[
-              {l:'Setor',         bg:C.bg3,    c:C.text1},
-              {l:'Limite',        bg:C.bg3,    c:C.text2,    r:true},
-              {l:'Sld Inicial',   bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'+ Saques',      bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'= Disponível',  bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'− PC Prestado', bg:C.greenBg,c:C.green,    r:true},
-              {l:'Pendências',    bg:C.greenBg,c:C.amber,    r:true},
-              {l:'Sld Final D25', bg:C.blueBg, c:C.blueHi,  r:true},
-              {l:'Sld DATASUL',   bg:C.blueBg, c:C.text2,   r:true},
-              {l:'Aporte (=PC)',  bg:C.redBg,  c:C.red,     r:true},
-              {l:'Status',        bg:C.redBg,  c:C.text2,   center:true},
+              {l:'Setor',           bg:C.bg3,    c:C.text1},
+              {l:'Limite',          bg:C.bg3,    c:C.text2,    r:true},
+              {l:'Sld Inicial',     bg:'#0c2030',c:'#06b6d4',  r:true},
+              {l:'+ Saques',        bg:'#0c2030',c:'#06b6d4',  r:true},
+              {l:'= Disponível',    bg:'#0c2030',c:'#06b6d4',  r:true},
+              {l:'PC Aprovado (RDs)',bg:C.greenBg,c:C.green,   r:true},
+              {l:'Saldo em Caixa',  bg:C.bg3,    c:C.amber,    r:true},
+              {l:'Sld Final D25',   bg:C.blueBg, c:C.blueHi,  r:true},
+              {l:'Aporte (=PC)',    bg:C.redBg,  c:C.red,     r:true},
+              {l:'Status',          bg:C.redBg,  c:C.text2,   center:true},
             ].map(h=>e('th',{key:h.l,style:{
               padding:'8px 12px',textAlign:h.center?'center':h.r?'right':'left',
               fontSize:9,color:h.c,textTransform:'uppercase',letterSpacing:'.05em',
@@ -2584,30 +2826,40 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
               whiteSpace:'nowrap',fontWeight:600}},h.l))
           )),
           e('tbody',null,
-            vAp.map(a=>{
-              const isNeg=a.sldFinal<0, isOk=a.valor_aporte===0&&!isNeg;
-              const cor=isNeg?C.red:isOk?C.green:C.amber;
+            vAp.map(function(a){
+              var semRD   = a.qtdRDs===0 && a.totalSaidas>0;
+              var isNeg   = a.sldFinal<0;
+              var isOk    = a.status==='PC OK';
+              var isSemMov= a.status==='Sem movimento';
+              var corBadge= semRD?'amber': isNeg?'red': isOk||isSemMov?'green':'amber';
               return e('tr',{key:a.setor,style:{borderBottom:'1px solid '+C.border+'22',
-                background:isNeg?C.red+'08':a.diferenca!==0?C.amber+'06':'transparent'}},
+                background:semRD?C.amber+'08':isNeg?C.red+'08':'transparent'}},
                 e('td',{style:{padding:'10px 12px',fontWeight:600,fontSize:12}},a.setor),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text2}},'R$ '+fmt(a.limite)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',background:'#06b6d408'}},'R$ '+fmt(a.sldInicial||0)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:500,background:'#06b6d408'}},'R$ '+fmt(a.saques||0)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text0,fontWeight:600,background:'#06b6d408'}},'R$ '+fmt(a.disponivel||0)),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,background:C.green+'06'}},'R$ '+fmt(a.pc||0)),
+                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,background:C.green+'06'}},
+                  e('div',null,'R$ '+fmt(a.pc||0)),
+                  a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' aprovado'+(a.qtdRDs>1?'s':''))
+                ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,
-                  color:a.pendencia>0?C.amber:C.text2,background:C.green+'06'},
-                  title:'Informativo: lançamentos sem doc fiscal ainda (não subtrai do saldo)'},
-                  e('div',null,'R$ '+fmt(a.pendencia||0)),
-                  a.pendencia>0&&e('div',{style:{fontSize:8,color:C.amber,marginTop:1}},'sem doc. fiscal')
+                  color:a.saldo_caixa>0?C.amber:C.text2}},
+                  a.saldo_caixa>0?e('div',null,
+                    e('div',null,'R$ '+fmt(a.saldo_caixa)),
+                    e('div',{style:{fontSize:8,color:C.amber,marginTop:1}},'saldo em caixa')
+                  ):e('span',{style:{color:C.text2}},'—')
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,fontWeight:700,color:isNeg?C.red:C.blue,background:C.blueBg}},'R$ '+fmt(a.sldFinal||0)),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text2,background:C.blueBg}},'R$ '+fmt(a.sldTotvs||0)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',background:C.redBg}},
-                  a.valor_aporte>0?e('div',{style:{fontFamily:C.mono,fontSize:13,fontWeight:700,color:C.red}},'R$ '+fmt(a.valor_aporte)):e('span',{style:{color:C.text2}},'—')
+                  a.pc>0?e('div',{style:{fontFamily:C.mono,fontSize:13,fontWeight:700,color:C.red}},'R$ '+fmt(a.pc)):
+                  semRD?e('div',{style:{fontFamily:C.mono,fontSize:11,color:C.amber}},'Aguardando RD'):
+                  e('span',{style:{color:C.text2}},'—')
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'center',background:C.redBg}},
-                  e(Badge,{color:isNeg?'red':isOk?'green':'amber'},isNeg?'Negativo':isOk?'OK':'Aporte')
+                  e(Badge,{color:corBadge},
+                    semRD?'Sem RD': isNeg?'Negativo': isOk?'PC OK': isSemMov?'Sem mov.':'Aporte'
+                  )
                 )
               );
             })
@@ -2701,7 +2953,8 @@ function EditCell({value,onSave,mono}) {
 // ── LANÇAMENTO MANUAL ──────────────────────────────────────────────────────────
 function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue}) {
   const dS = (!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'';
-  const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''});
+  const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''});
+  const [modeloM, setModeloM] = useState(false); // modal de seleção de modelo
   const [fu,setFu] = useState(null);
   const [load,setLoad] = useState(false);
   const [ocrLoad,setOcrLoad] = useState(false); // loading do OCR
@@ -2775,7 +3028,9 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         local:f.local.toUpperCase(),valor:parseFloat(f.valor),tipo:f.tipo,empresa:f.empresa,
         cod_fornec:f.cod_fornec,num_nf:f.num_nf,centro_custo:f.centro_custo,
         conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,num_requisicao:f.num_requisicao,
-        id_datasul:f.id_datasul,auditStatus:fu?'aguardando_conferencia':'aguardando_doc_fiscal',
+        id_datasul:f.id_datasul,
+        num_ems:f.num_ems||'',num_item:f.num_item||'',num_sgp:f.num_sgp||'',
+        historico:f.historico||'',tipo_doc:f.tipo_doc||'',auditStatus:fu?'aguardando_conferencia':'aguardando_doc_fiscal',
         iaStatus:'AMARELO',documento_fiscal_url:fu||undefined,operador_nome:user.name};
       if(isMobile && onAddQueue) {
         // Mobile → vai para Caixa de Entrada para conferência
@@ -2797,7 +3052,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         onAdd(item);
         toast.success('✓ Lançamento registrado!');
       }
-      setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''}));
+      setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''}));
       setFu(null);setAf(new Set());setLoad(false);
     },700);
   }
@@ -2832,6 +3087,63 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
     e(Card,null,
       e(CardHdr,{title:'Registro de despesa — '+f.setor||'Selecione o setor',icon:'📝',sub:'Operador: '+user.name}),
       e('div',{style:{padding:20}},
+        // ── Botão usar como modelo ──────────────────────────────────────────
+        lanc.filter(function(l){return l.setor===f.setor&&l.tipo==='SAÍDA';}).length>0&&
+        e('div',{style:{marginBottom:14}},
+          e('button',{
+            onClick:function(){setModeloM(true);},
+            style:{display:'flex',alignItems:'center',gap:8,padding:'8px 14px',
+              borderRadius:8,border:'1px solid '+C.blue,background:C.blueBg,
+              color:C.blueHi,fontSize:12,cursor:'pointer',fontWeight:500}
+          },'📋 Usar lançamento anterior como modelo'),
+          e('span',{style:{fontSize:11,color:C.text2,marginLeft:8}},'Copia os campos e você só muda valor, data e NF')
+        ),
+        // ── Modal seleção de modelo ─────────────────────────────────────────
+        modeloM&&e(Modal,{open:true,onClose:function(){setModeloM(false);},title:'Selecionar modelo',width:560},
+          e('p',{style:{fontSize:12,color:C.text2,marginBottom:14}},'Selecione um lançamento anterior. Os campos serão copiados — você só precisará alterar valor, data e Nº da NF.'),
+          e('div',{style:{display:'flex',flexDirection:'column',gap:8,maxHeight:380,overflowY:'auto'}},
+            lanc
+              .filter(function(l){return l.setor===f.setor&&l.tipo==='SAÍDA';})
+              .slice(0,20)
+              .map(function(l){
+                return e('div',{key:l.id,
+                  onClick:function(){
+                    // Copiar tudo exceto valor, data, num_nf e id
+                    setF(function(prev){return Object.assign({},prev,{
+                      local:       l.local||prev.local,
+                      empresa:     l.empresa||prev.empresa,
+                      portador:    l.portador||prev.portador,
+                      tipo:        l.tipo||prev.tipo,
+                      cod_fornec:  l.cod_fornec||prev.cod_fornec,
+                      centro_custo:l.centro_custo||prev.centro_custo,
+                      conta_contabil:l.conta_contabil||prev.conta_contabil,
+                      num_ordem:   l.num_ordem||prev.num_ordem,
+                      num_requisicao:l.num_requisicao||prev.num_requisicao,
+                      id_datasul:  l.id_datasul||prev.id_datasul,
+                      num_ems:     l.num_ems||prev.num_ems,
+                      num_item:    l.num_item||prev.num_item,
+                      num_sgp:     l.num_sgp||prev.num_sgp,
+                      historico:   l.historico||prev.historico,
+                      tipo_doc:    l.tipo_doc||prev.tipo_doc,
+                      // NÃO copia: valor, data, num_nf
+                    });});
+                    setModeloM(false);
+                    toast.success('📋 Modelo aplicado! Ajuste valor, data e Nº NF.');
+                  },
+                  style:{padding:'10px 14px',borderRadius:8,border:'1px solid '+C.border,
+                    background:C.bg1,cursor:'pointer',display:'flex',alignItems:'center',gap:12}
+                },
+                  e('div',{style:{flex:1,minWidth:0}},
+                    e('div',{style:{fontSize:12,fontWeight:500,color:C.text0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.local||'—'),
+                    e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},
+                      l.data+' · '+(l.historico||l.tipo_doc||'')+(l.num_ems?' · EMS '+l.num_ems:'')+(l.num_item?' · Item '+l.num_item:'')
+                    )
+                  ),
+                  e('span',{style:{fontFamily:C.mono,fontSize:12,color:C.text2,flexShrink:0}},'R$ '+fmt(l.valor))
+                );
+              })
+          )
+        ),
         e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14,marginBottom:14}},
           e(Fld,{label:'Setor *'},e(SI,{value:f.setor,onChange:v=>{upd('setor',v);upd('portador','');},options:allSec})),
           e(Fld,{label:'Empresa *'},e(SI,{value:f.empresa,onChange:v=>upd('empresa',v),options:companies})),
@@ -2846,7 +3158,15 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           e(FI,{label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
           e(FI,{label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
           e(FI,{label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
-          e(FI,{label:'Nº requisição',k:'num_requisicao',placeholder:'Ex: REQ-123',mono:true})
+          e(FI,{label:'Nº requisição',k:'num_requisicao',placeholder:'Ex: REQ-123',mono:true}),
+          // ── Campos novos: EMS, Item, SGP, Histórico, Tipo Doc ───────────
+          e(FI,{label:'Nº E.M.S',k:'num_ems',placeholder:'Ex: 150.208',mono:true}),
+          e(FI,{label:'Nº Item',k:'num_item',placeholder:'Ex: 910.0001',mono:true}),
+          e(FI,{label:'Nº SGP',k:'num_sgp',placeholder:'Ex: 910.0001',mono:true}),
+          e(Fld,{label:'Tipo de documento'},e(SI,{value:f.tipo_doc,onChange:v=>upd('tipo_doc',v),options:[
+            '','Cupom Fiscal','NF-e','NFS-e','Recibo (Aplicativos Transportes / Ifood)','Recibo Uber/99','DUA','DARF','Recibo'
+          ]})),
+          e(FI,{label:'Histórico',k:'historico',placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO',span:2})
         ),
         e(Fld,{label:'Documento fiscal'},
           e('label',{style:{display:'block',cursor:'pointer'}},
@@ -3939,14 +4259,16 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
     });
   }
 
-  function salvarRD(status) {
+  function submitRD(status) {
     if(!novoRD) return;
-    var rd = {...novoRD, status};
+    var rd = Object.assign({}, novoRD, {status: status, _ts: Date.now()});
     setRds(function(p){
       var idx = p.findIndex(function(r){return r.id===rd.id;});
       if(idx>=0){var n=[...p];n[idx]=rd;return n;}
       return [...p, rd];
     });
+    // Persistir no Firebase
+    salvarRD(rd);
     setNovoRD(null); setEtapa(null);
     if(status===RD_STATUS.ENVIADO) toast.success('📤 RD-'+rd.numero+' enviado ao financeiro!');
     else toast.info('💾 RD-'+rd.numero+' salvo como rascunho.');
@@ -4044,7 +4366,14 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
               e('input',{type:'checkbox',checked:sel,readOnly:true,style:{flexShrink:0}}),
               e('div',{style:{flex:1,minWidth:0}},
                 e('div',{style:{fontSize:12,fontWeight:500,color:C.text0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.local),
-                e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},l.data+' · '+l.portador+(outEmp?' · ⚠ '+l.empresa:''))
+                e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},
+                  l.data+' · '+l.portador+(outEmp?' · ⚠ '+l.empresa:'')
+                ),
+                e('div',{style:{fontSize:10,color:C.text2,marginTop:2,display:'flex',gap:8}},
+                  l.tipo_doc&&e('span',{style:{color:C.blueHi}},l.tipo_doc),
+                  l.num_nf&&e('span',null,'Nº '+l.num_nf),
+                  l.historico&&e('span',{style:{color:C.text2}},l.historico)
+                )
               ),
               outEmp&&e('span',{style:{fontSize:10,color:C.amber,padding:'1px 6px',border:'1px solid '+C.amber,borderRadius:10,flexShrink:0}},'Reembolso'),
               e('span',{style:{fontFamily:C.mono,fontSize:13,fontWeight:600,color:C.red,flexShrink:0}},'R$ '+fmt(l.valor))
@@ -4066,32 +4395,61 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
     var step3 = e('div',null,
       e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:14}},
         [{l:'Empresa',v:'TV GAZETA'},{l:'CC',v:novoRD.centro_custo||'—'},{l:'Gerência/Área',v:novoRD.gerencia||'—'},
-         {l:'Nº RD',v:'RD-'+novoRD.numero},{l:'Data',v:novoRD.data_emissao},{l:'Portador',v:user.name}
+         {l:'Nº RD',v:'RD-'+novoRD.numero},{l:'Data emissão',v:novoRD.data_emissao},{l:'Portador',v:user.name}
         ].map(function(m){return e('div',{key:m.l,style:{background:C.bg2,borderRadius:8,padding:'10px 12px'}},
           e('div',{style:{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:3}},m.l),
           e('div',{style:{fontSize:12,fontWeight:500,color:C.text0}},m.v)
         );})
       ),
       e(Card,null,
-        e(CardHdr,{title:'Lançamentos vinculados',icon:'📄'}),
-        lancVinc.length===0?e(Empty,{icon:'📄',title:'Nenhum lançamento selecionado',sub:'Volte e selecione os lançamentos.'}):
-        lancVinc.map(function(l){
-          var outEmp=l.empresa&&l.empresa!=='TV GAZETA';
-          return e('div',{key:l.id,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid '+C.border+'22',fontSize:12}},
-            e('span',{style:{color:C.text2,minWidth:72,fontFamily:C.mono}},l.data),
-            e('span',{style:{background:C.bg3,padding:'1px 6px',borderRadius:4,fontSize:10}},l.num_nf?'NF-e':'Comprovante'),
-            e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.local),
-            outEmp&&e('span',{style:{fontSize:10,color:C.amber,padding:'1px 6px',border:'1px solid '+C.amber,borderRadius:10}},'↔ '+l.empresa),
-            e('span',{style:{fontFamily:C.mono,fontWeight:600,color:C.red}},'R$ '+fmt(l.valor))
-          );
-        }),
-        e('div',{style:{display:'flex',justifyContent:'flex-end',gap:12,marginTop:12,paddingTop:10,borderTop:'1px solid '+C.border+'44'}},
-          e('span',{style:{fontSize:12,color:C.text2}},lancVinc.length+' lançamentos'),
-          e('span',{style:{fontSize:17,fontWeight:600,fontFamily:C.mono,color:C.text0}},'Total: R$ '+fmt(totalSel))
+        e(CardHdr,{title:'Lançamentos vinculados — '+lancVinc.length+' comprovantes',icon:'📄'}),
+        lancVinc.length===0
+          ? e(Empty,{icon:'📄',title:'Nenhum lançamento selecionado',sub:'Volte e selecione os lançamentos.'})
+          : e('div',{style:{overflowX:'auto'}},
+              e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+                e('thead',null,e('tr',null,
+                  ...[
+                    {l:'Data doc fiscal'},
+                    {l:'Conta/Natureza'},
+                    {l:'Tipo de Docto'},
+                    {l:'Nº do Documento'},
+                    {l:'Valor',r:true},
+                    {l:'Funcionário'},
+                    {l:'Histórico'},
+                  ].map(function(h){return e('th',{key:h.l,style:{
+                    padding:'6px 10px',textAlign:h.r?'right':'left',
+                    fontSize:9,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',
+                    background:C.bg2,borderBottom:'1px solid '+C.border,whiteSpace:'nowrap'
+                  }},h.l);})
+                )),
+                e('tbody',null,
+                  lancVinc.map(function(l){
+                    var outEmp=l.empresa&&l.empresa!=='TV GAZETA';
+                    var tipoDoc = l.tipo_doc||'Comprovante';
+                    var natureza = l.conta_contabil ? l.conta_contabil+' - '+(l.historico||l.local||'') : (l.historico||l.local||'');
+                    return e('tr',{key:l.id,style:{borderBottom:'1px solid '+C.border+'22',background:outEmp?C.amber+'08':'transparent'}},
+                      e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2,whiteSpace:'nowrap'}},l.data),
+                      e('td',{style:{padding:'7px 10px',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},natureza||'—'),
+                      e('td',{style:{padding:'7px 10px'}},
+                        e('span',{style:{background:outEmp?C.amberDim:C.bg3,color:outEmp?C.amber:C.blueHi,padding:'1px 6px',borderRadius:4,fontSize:10,whiteSpace:'nowrap'}},tipoDoc)
+                      ),
+                      e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_nf||'—'),
+                      e('td',{style:{padding:'7px 10px',textAlign:'right',fontFamily:C.mono,fontWeight:600,color:C.red,whiteSpace:'nowrap'}},'R$ '+fmt(l.valor)),
+                      e('td',{style:{padding:'7px 10px',color:C.text1}},l.portador||l.operador_nome||'—'),
+                      e('td',{style:{padding:'7px 10px',color:C.text2,fontSize:10}},l.historico||l.local||'—')
+                    );
+                  })
+                ),
+                e('tfoot',null,e('tr',{style:{borderTop:'2px solid '+C.borderHi,background:C.bg2}},
+                  e('td',{colSpan:4,style:{padding:'8px 10px',fontSize:11,color:C.text2}},lancVinc.length+' comprovantes'),
+                  e('td',{style:{padding:'8px 10px',textAlign:'right',fontFamily:C.mono,fontWeight:700,fontSize:14,color:C.text0}},'R$ '+fmt(totalSel)),
+                  e('td',{colSpan:2,style:{padding:'8px 10px',fontSize:10,color:C.text2}},'Total das Despesas')
+                ))
+              )
+            ),
+        temReemb&&e('div',{style:{marginTop:10,background:C.amberDim,border:'1px solid '+C.amber,borderRadius:8,padding:'10px 14px',fontSize:12,color:C.amber}},
+          '↔ Pendência de reembolso registrada — será liquidada na conciliação quando a transferência bancária entrar no extrato.'
         )
-      ),
-      temReemb&&e('div',{style:{marginTop:10,background:C.amberDim,border:'1px solid '+C.amber,borderRadius:8,padding:'10px 14px',fontSize:12,color:C.amber}},
-        '↔ Pendência de reembolso registrada — será liquidada na conciliação quando a transferência bancária entrar no extrato.'
       )
     );
 
@@ -4121,7 +4479,7 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
         e('div',{style:{display:'flex',justifyContent:'space-between',marginTop:16,paddingTop:14,borderTop:'1px solid '+C.border+'44'}},
           e('div',{style:{display:'flex',gap:8}},
             e(Btn,{onClick:()=>{setNovoRD(null);setEtapa(null);}},'Cancelar'),
-            passo>1&&e(Btn,{onClick:()=>setPasso(function(p){return p-1;});},'← Voltar')
+            passo>1&&e(Btn,{onClick:()=>setPasso(function(p){return p-1;})},'← Voltar')
           ),
           e('div',{style:{display:'flex',gap:8}},
             passo<3&&e(Btn,{variant:'primary',onClick:()=>{
@@ -4129,14 +4487,14 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
               setPasso(function(p){return p+1;});
             }},'Próximo →'),
             passo===3&&e(React.Fragment,null,
-              e(Btn,{onClick:()=>salvarRD(RD_STATUS.RASCUNHO)},'💾 Salvar rascunho'),
+              e(Btn,{onClick:()=>submitRD(RD_STATUS.RASCUNHO)},'💾 Salvar rascunho'),
               e(Btn,{variant:'primary',onClick:()=>setConfEnviar(true)},'📤 Enviar ao financeiro')
             )
           )
         )
       ),
       e(Confirm,{open:confEnviar,title:'Enviar RD ao financeiro',msg:'O RD-'+novoRD.numero+' será enviado para validação. Confirma?',variant:'primary',
-        onConfirm:()=>{setConfEnviar(false);salvarRD(RD_STATUS.ENVIADO);},
+        onConfirm:()=>{setConfEnviar(false);submitRD(RD_STATUS.ENVIADO);},
         onCancel:()=>setConfEnviar(false)})
     );
   }
@@ -4201,19 +4559,23 @@ function TabFilaRDs({user,rds,setRds,lanc,sMap,toast}) {
   var todos = rds.filter(function(r){return r.status!==RD_STATUS.RASCUNHO;});
 
   function aprovar(rd) {
+    var updated = Object.assign({},rd,{status:RD_STATUS.APROVADO,aprovado_por:user.name,aprovado_em:isoToBR(todayISO()),_ts:Date.now()});
     setRds(function(p){return p.map(function(r){
       if(r.id!==rd.id) return r;
-      return {...r,status:RD_STATUS.APROVADO,aprovado_por:user.name,aprovado_em:isoToBR(todayISO())};
+      return updated;
     });});
+    salvarRD(updated);
     toast.success('✅ RD-'+rd.numero+' aprovado!');
     setDetalhe(null); setConfAprovar(false);
   }
 
   function devolver(rd,obs) {
+    var updated = Object.assign({},rd,{status:RD_STATUS.DEVOLVIDO,obs_devolucao:obs,_ts:Date.now()});
     setRds(function(p){return p.map(function(r){
       if(r.id!==rd.id) return r;
-      return {...r,status:RD_STATUS.DEVOLVIDO,obs_devolucao:obs};
+      return updated;
     });});
+    salvarRD(updated);
     toast.warning('↩ RD-'+rd.numero+' devolvido ao setor.');
     setDetalhe(null); setConfDevolver(false); setObsDevolver('');
   }
@@ -4980,14 +5342,21 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
   const uNuf = (k,v)=>setNuf(p=>({...p,[k]:v}));
 
   function openEdit(u) {
-    setEditM({...u, password:'', newPassword:''});
+    setEditM(Object.assign({}, u, {password:'', newPassword:'', _loginOriginal: u.login}));
   }
 
   function saveEdit() {
-    if(!editM.name||!editM.email){toast.error('Nome e e-mail obrigatórios.');return;}
+    if(!editM.login||!editM.name||!editM.email){toast.error('Login, nome e e-mail obrigatórios.');return;}
+    var loginNovo = editM.login.toLowerCase().trim();
+    var loginOriginal = editM._loginOriginal || loginNovo;
+    // Verificar se o novo login já está em uso por OUTRO usuário
+    if(loginNovo !== loginOriginal && users.some(function(u){return u.login===loginNovo;})){
+      toast.error('Login "'+loginNovo+'" já está em uso por outro usuário.');return;
+    }
     setUsers(function(p){return p.map(function(u){
-      if(u.login!==editM.login) return u;
+      if(u.login!==loginOriginal) return u;
       var updated = Object.assign({},u,{
+        login: loginNovo,
         name: editM.name,
         email: editM.email,
         position: editM.position||u.position,
@@ -4998,6 +5367,8 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
       if(editM.newPassword && editM.newPassword.length>=4) {
         updated.password = editM.newPassword;
       }
+      // Persistir no Firebase se autenticado
+      if(_db && u.uid) salvarUserProfile(u.uid, updated);
       return updated;
     });});
     toast.success('✅ Usuário '+editM.name+' atualizado!');
@@ -5045,9 +5416,10 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
     e(Modal,{open:!!editM,onClose:()=>setEditM(null),title:'Editar usuário',width:520},
       editM&&e('div',null,
         e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
-          e(Fld,{label:'Login (não editável)'},
-            e('div',{style:{background:C.bg3,border:'1px solid '+C.border,borderRadius:6,
-              padding:'8px 10px',fontSize:12,color:C.text2,fontFamily:C.mono}},'@'+editM.login)
+          e(Fld,{label:'Login *'},
+            e(TI,{value:editM.login,onChange:function(v){
+              setEditM(function(p){return Object.assign({},p,{login:v.toLowerCase().replace(/\s/g,'')});});
+            },placeholder:'ex: joao.silva',mono:true})
           ),
           e(Fld,{label:'Perfil'},
             e(SI,{value:editM.role,onChange:function(v){setEditM(function(p){return Object.assign({},p,{role:v});})},options:['OPERADOR','ADMIN']})
@@ -5326,7 +5698,7 @@ function FechamentoBanner({lanc, user, setTab}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB MANUAL DO SISTEMA
 // ═══════════════════════════════════════════════════════════════════════════
-function TabManual({user}) {
+function TabManual({user, lanc}) {
   var isA = user&&(user.role==='ADMIN'||user.hasGlobalAccess);
   var [sec, setSec] = useState('intro');
 
@@ -5814,12 +6186,28 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
   function carregarExtrato() {
     if(!extratoRaw.trim()){toast.error('Cole o extrato ou carregue o arquivo.');return;}
 
-    // R8: Verificar duplicata por hash
+    // R8: Verificar duplicata por hash (localStorage + Firebase)
     var hash = hashExtrato(extratoRaw);
     if(extratoJaImportado(hash)){
-      toast.error('⚠ Este extrato já foi importado nesta sessão. Reimportação bloqueada.');
+      toast.error('⛔ Este extrato já foi importado anteriormente. Reimportação bloqueada (R8).');
       return;
     }
+    // Verificar também no Firebase (protege importação em outros navegadores)
+    if(_db) {
+      _db.collection('extratos_importados').doc(hash).get().then(function(doc){
+        if(doc.exists) {
+          var dt = (doc.data().importado_em||'').substring(0,10);
+          toast.error('⛔ Este extrato já foi importado em '+dt+'. Reimportação bloqueada (R8).');
+          return;
+        }
+        _processarExtrato(hash);
+      }).catch(function(){ _processarExtrato(hash); });
+      return;
+    }
+    _processarExtrato(hash);
+  }
+
+  function _processarExtrato(hash) {
 
     // Usar parser Banestes específico
     var itens = parseBanestsCSV(extratoRaw, sMap);
@@ -5866,26 +6254,18 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
   }
 
   function confirmarImportacao() {
-    // Registrar hash para bloquear reimportação
-    registrarExtrato(hashAtual);
-    // Adicionar lançamentos ao banco
+    // Registrar hash para bloquear reimportação (localStorage + Firebase)
+    registrarExtrato(hashAtual, nomeArq || 'extrato');
+    // Adicionar lançamentos ao banco — acumulativo (não substitui existentes)
     setLanc(function(prev){
       var ids = new Set(prev.map(function(l){return l.id;}));
       var novos = extrato.filter(function(i){return !ids.has(i.id);});
-      return [...prev,...novos];
+      // Salvar novos no Firebase
+      novos.forEach(function(l){ salvarLancamento(Object.assign({},l,{_ts:Date.now()})); });
+      return prev.concat(novos);
     });
     setFase('confronto');
     toast.success('✅ Extrato importado e bloqueado contra reimportação!');
-  }
-
-  function handleFile(ev) {
-    var file=ev.target.files&&ev.target.files[0];
-    if(!file)return;
-    setNomeArq(file.name);
-    var reader=new FileReader();
-    reader.onload=function(e){setExtratoRaw(e.target.result);};
-    reader.readAsText(file,'UTF-8');
-    toast.success('📄 '+file.name+' carregado — clique em "Processar" para continuar.');
   }
 
   function aprovar(extId) {
@@ -5894,15 +6274,11 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
     if(lancId&&setLanc){
       setLanc(function(prev){return prev.map(function(l){
         if(l.id!==lancId)return l;
-        return Object.assign({},l,{auditStatus:'conciliado',iaStatus:'VERDE',
+        var updated=Object.assign({},l,{auditStatus:'conciliado',iaStatus:'VERDE',
           data_conciliacao:isoToBR(todayISO()),conciliado_por:user.name});
+        salvarLancamento(updated);
+        return updated;
       });});
-    }
-  }          // Persistir no Firebase
-          salvarLancamento(updated);
-          return updated;
-        });
-      });
     }
     toast.success('✅ Lançamento conciliado! Status atualizado no Consolidado.');
   }
@@ -5931,47 +6307,52 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
     var file = ev.target.files && ev.target.files[0];
     if(!file) return;
     var ext = file.name.split('.').pop().toLowerCase();
+    setNomeArq(file.name);
     var reader = new FileReader();
 
     if(ext==='csv'||ext==='txt') {
       reader.onload = function(e2){
         var raw = e2.target.result;
         setExtratoRaw(raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n'));
-        toast.success('📄 '+file.name+' carregado!');
+        toast.success('📄 '+file.name+' carregado! Clique em Processar.');
       };
+      reader.onerror = function(){ toast.error('Erro ao ler o arquivo CSV.'); };
       reader.readAsText(file,'UTF-8');
 
     } else if(ext==='xlsx'||ext==='xls') {
       reader.onload = function(e2){
         try {
-          var csvText = '';
           if(window.XLSX) {
             var wb = XLSX.read(e2.target.result,{type:'array',cellDates:true});
             var ws = wb.Sheets[wb.SheetNames[0]];
-            csvText = XLSX.utils.sheet_to_csv(ws,{FS:'	',blankrows:false});
+            var csvText = XLSX.utils.sheet_to_csv(ws,{FS:'\t',blankrows:false});
             var linhas = csvText.split('\n').filter(function(l){return l.replace(/\t/g,'').trim().length>0;});
             setExtratoRaw(linhas.join('\n'));
-            toast.success('📊 Excel lido: '+linhas.length+' linhas!');
+            toast.success('📊 Excel lido: '+linhas.length+' linhas! Clique em Processar.');
           } else {
-            toast.error('Biblioteca Excel não carregada. Use CSV ou OFX.');
+            toast.error('Biblioteca Excel não disponível. Use CSV ou OFX.');
           }
-        } catch(er){ toast.error('Erro ao ler Excel: '+er.message); }
+        } catch(er){ toast.error('Erro ao ler Excel: '+er.message+'. Tente salvar como CSV.'); }
       };
+      reader.onerror = function(){ toast.error('Erro ao ler o arquivo Excel.'); };
       reader.readAsArrayBuffer(file);
 
     } else if(ext==='ofx'||ext==='qfx') {
       reader.onload = function(e2){
         try {
           var linhas = parseOFXConc(e2.target.result);
-          if(!linhas.length){ toast.error('Nenhuma transação no OFX.'); return; }
+          if(!linhas.length){ toast.error('Nenhuma transação encontrada no OFX.'); return; }
           var csv = linhas.map(function(l){return l.data+'\t'+l.desc+'\t'+String(l.valor);}).join('\n');
-          toast.success('🏦 OFX lido: '+linhas.length+' transações!');
+          setExtratoRaw(csv);
+          toast.success('🏦 OFX lido: '+linhas.length+' transações! Clique em Processar.');
         } catch(er){ toast.error('Erro ao ler OFX: '+er.message); }
       };
+      reader.onerror = function(){ toast.error('Erro ao ler o arquivo OFX.'); };
       reader.readAsText(file,'UTF-8');
 
     } else {
       toast.error('Formatos aceitos: CSV, TXT, XLS, XLSX, OFX, QFX');
+      setNomeArq('');
     }
   }
 
@@ -6072,12 +6453,23 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
       nomeArq&&e('div',{style:{fontSize:12,color:C.text2,marginBottom:10}},'📄 Arquivo: '+nomeArq),
       e('div',{style:{maxHeight:200,overflowY:'auto',marginBottom:14}},
         e('table',null,
-          e('thead',null,e('tr',null,e(TH,null,'Data'),e(TH,null,'Portador'),e(TH,null,'Estabelecimento'),e(TH,null,'Setor'),e(TH,{right:true},'Valor'),e(TH,null,'Tipo'))),
+          e('thead',null,e('tr',null,
+            e(TH,null,'Data'),
+            e(TH,null,'Portador'),
+            e(TH,null,'Nº Cartão'),
+            e(TH,null,'Estabelecimento'),
+            e(TH,null,'Descrição'),
+            e(TH,null,'Setor'),
+            e(TH,{right:true},'Valor'),
+            e(TH,null,'Tipo')
+          )),
           e('tbody',null, extrato.slice(0,20).map(function(i){
             return e('tr',{key:i.id,style:{borderBottom:'1px solid '+C.border+'22',fontSize:11}},
               e('td',{style:{padding:'5px 10px',fontFamily:C.mono,color:C.text2}},i.data),
-              e('td',{style:{padding:'5px 10px',color:C.text0}},i.portador||'—'),
+              e('td',{style:{padding:'5px 10px',color:C.text0,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},i.portador||'—'),
+              e('td',{style:{padding:'5px 10px',fontFamily:C.mono,color:C.text2,fontSize:10}},i.cartao||'—'),
               e('td',{style:{padding:'5px 10px',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},i.local||i.descricao_banestes||'—'),
+              e('td',{style:{padding:'5px 10px',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text2,fontSize:10}},i.descricao_banestes||'—'),
               e('td',{style:{padding:'5px 10px'}},e('span',{style:{fontSize:9,background:i.setor==='NÃO IDENTIFICADO'?C.amberDim:C.bg3,color:i.setor==='NÃO IDENTIFICADO'?C.amber:C.text2,padding:'1px 5px',borderRadius:4}},i.setor)),
               e('td',{style:{padding:'5px 10px',textAlign:'right',fontFamily:C.mono,color:C.red,fontWeight:500}},'R$ '+fmt(i.valor)),
               e('td',{style:{padding:'5px 10px'}},e('span',{style:{fontSize:9,color:i.tipo==='SAÍDA'?C.red:C.green}},i.tipo))
@@ -6403,7 +6795,7 @@ function App() {
         if(items.length > 0) setLanc(items);
       }, function(e){ console.error('Lanc listener:', e); });
 
-    // Escutar queue (Caixa de Entrada) em tempo real — sem filtro para evitar índice
+    // Escutar queue (Caixa de Entrada) em tempo real
     var unsubQueue = _db.collection('queue')
       .orderBy('_ts', 'desc')
       .onSnapshot(function(snap){
@@ -6412,9 +6804,29 @@ function App() {
           var d = doc.data();
           if(d.status !== 'processado') items.push(d);
         });
-        // Substituir queue completamente com dados do Firebase
         setQueue(items);
       }, function(e){ console.error('Queue listener:', e); });
+
+    // Escutar RDs em tempo real
+    var unsubRDs = _db.collection('rds')
+      .orderBy('_ts', 'desc')
+      .onSnapshot(function(snap){
+        var items = [];
+        snap.forEach(function(doc){ items.push(doc.data()); });
+        if(items.length > 0) setRds(items);
+      }, function(e){ console.error('RDs listener:', e); });
+
+    // Escutar usuários
+    var unsubUsers = _db.collection('users')
+      .onSnapshot(function(snap){
+        var items = [];
+        snap.forEach(function(doc){ 
+          var u = doc.data();
+          u.uid = doc.id;
+          items.push(u);
+        });
+        if(items.length > 0) setUsers(items);
+      }, function(e){ console.error('Users listener:', e); });
 
     } // fim startListeners
     tryInit(0);
@@ -6539,7 +6951,7 @@ function App() {
     isMobile&&!showCapture&&e(MobNav,{tab:tab,setTab:setTab,bc:bc,isAdmin:isA}),
     e(Confirm,{open:confReset,title:'Zerar sistema',msg:'⚠ Isso apagará TODOS os lançamentos permanentemente.',onConfirm:()=>{setLanc([]);setConfReset(false);toast.info('Banco zerado.');},onCancel:()=>setConfReset(false)}),
     e('div',{style:{display:'flex',minHeight:'100vh',background:C.bg0}},
-      e(Sidebar,{tab,setTab,user,onLogout:()=>{setUser(null);setTab('dashboard');},bc}),
+      e(Sidebar,{tab,setTab,user,onLogout:function(){if(_auth)_auth.signOut().catch(function(){});localStorage.removeItem('gz_c');setUser(null);setTab('apresentacao');},bc}),
       e('main',{style:{flex:1,minWidth:0,overflowY:'auto',padding:isMobile?'12px 0 80px 0':'22px 28px'}},
         e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:isMobile?8:22,flexWrap:'wrap',gap:12}},
           e('div',null,
@@ -6553,7 +6965,7 @@ function App() {
           )
         ),
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
-        tab==='apresentacao'&&e(TabManual,{user:user}),
+        tab==='apresentacao'&&e(TabManual,{user:user, lanc:lanc}),
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,sMap,toast,setTab}),
         tab==='fila_rds'&&e(TabFilaRDs,{user,rds,setRds,lanc,sMap,toast}),
