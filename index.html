@@ -1009,69 +1009,49 @@ var SECTOR_BANK_DEFAULT = {};
 //   Próximo período: Sld Final → vira novo Sld Inicial (D26) do mês seguinte
 // ─────────────────────────────────────────────────────────────────────────────
 function calcAportes(lanc, limits, bankInfo, rds) {
-  var bank = bankInfo || SECTOR_BANK_DEFAULT;
   var rdsAprov = (rds||[]).filter(function(r){return r.status===RD_STATUS.APROVADO;});
 
   return Object.keys(limits).map(function(setor) {
     var items = lanc.filter(function(l){return l.setor===setor;});
 
-    // R5: PC real = SEMPRE RDs aprovados (todos os setores usam RD)
+    // R5: PC real = SEMPRE RDs aprovados
     var pc = rdsAprov
       .filter(function(r){return r.setor===setor;})
       .reduce(function(s,r){return s+(r.total||0);},0);
 
-    // Quantidade de RDs aprovados para este setor
     var qtdRDs = rdsAprov.filter(function(r){return r.setor===setor;}).length;
 
-    // Saques do extrato Banestes para este setor
+    // Saques do extrato Banestes
     var sacado = items
       .filter(function(l){return l.tipo==='SAÍDA';})
       .reduce(function(s,l){return s+l.valor;},0);
 
-    // Saldo físico real: sacado - PC aprovado (R5)
     var saldoFisico = sacado - pc;
 
-    // Lançamentos ainda sem RD aprovado vinculado (pendência)
-    var pendencia = sacado - pc;
-
-    // Campos do extrato bancário
-    var bk = bank[setor] || {sldInicial:0, saques:0};
-    var disponivel = bk.sldInicial + bk.saques;
+    // Saldo bancário editado pelo admin no TabSaldoBancario
+    // Se não preenchido: sldInicial=0, saques=sacado do extrato
+    var bk = (bankInfo && bankInfo[setor]) ? bankInfo[setor] : {sldInicial:0, saques:sacado};
+    var sldInicial = bk.sldInicial || 0;
+    var saquesB    = bk.saques !== undefined ? bk.saques : sacado;
+    var disponivel = sldInicial + saquesB;
     var sldFinal   = disponivel - pc;
 
-    // Status
     var status;
-    if(qtdRDs === 0 && sacado === 0) {
-      status = 'Sem movimento';
-    } else if(qtdRDs === 0 && sacado > 0) {
-      status = 'Aguardando RD';
-    } else if(saldoFisico < 0) {
-      status = 'Negativo';
-    } else if(pc > 0 && saldoFisico <= 0.01) {
-      status = 'PC OK';
-    } else {
-      status = 'Repor R$ '+fmt(pc);
-    }
+    if(qtdRDs===0 && sacado===0) status='Sem movimento';
+    else if(qtdRDs===0 && sacado>0) status='Aguardando RD';
+    else if(sldFinal<0) status='Negativo';
+    else if(pc>0 && sldFinal<=0.01) status='PC OK';
+    else status='Repor R$ '+fmt(pc);
 
     return {
-      setor:        setor,
-      limite:       limits[setor],
-      sldInicial:   bk.sldInicial,
-      saques:       bk.saques,
-      disponivel:   disponivel,
-      pc:           pc,
-      qtdRDs:       qtdRDs,
-      pendencia:    pendencia,
-      pendencias:   saldoFisico,
-      totalSaidas:  sacado,
-      total_gasto:  pc,
-      saldo_caixa:  saldoFisico,
-      sldFinal:     sldFinal,
-      saldo_totvs:  sldFinal,
-      diferenca:    0,
-      valor_aporte: pc,
-      status:       status,
-      obs:          qtdRDs === 0 && sacado > 0 ? 'Sem RD aprovado' : '',
+      setor, limite:limits[setor],
+      sldInicial, saques:saquesB, disponivel, pc, qtdRDs,
+      pendencia:saldoFisico, pendencias:saldoFisico,
+      totalSaidas:sacado, total_gasto:pc,
+      saldo_caixa:saldoFisico, sldFinal,
+      saldo_totvs:sldFinal, diferenca:0,
+      valor_aporte:pc, status,
+      obs: qtdRDs===0 && sacado>0 ? 'Sem RD aprovado' : '',
     };
   });
 }
@@ -6596,9 +6576,11 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB SALDO BANCÁRIO POR SETOR
 // ═══════════════════════════════════════════════════════════════════════════
-function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast}) {
+function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSaldos}) {
+  // saldos e setSaldos vêm do App (estado global) para alimentar calcAportes
+  if(!saldos) saldos = {};
+  if(!setSaldos) setSaldos = function(){};
   var [editSaldo,setEditSaldo] = useState(null);
-  var [saldos,setSaldos] = useState({}); // setor → {sldInicial, saques}
 
   // Calcular totais por setor
   var setores = Object.keys(sMap).filter(function(s){
@@ -6754,6 +6736,7 @@ function App() {
   const [comp,setComp] = useState(COMPANIES);
   const [saved,setSaved] = useState(null);
   const [confReset,setConfReset] = useState(false);
+  const [saldosBancarios,setSaldosBancarios] = useState({}); // setor → {sldInicial, saques}
 
   // ── Firebase: inicializar e escutar dados em tempo real ──────────────────
   useEffect(function(){
@@ -6819,7 +6802,7 @@ function App() {
     tryInit(0);
   }, []);
 
-  const aportes = useMemo(()=>calcAportes(lanc,sLim,null,rds),[lanc,sLim,rds]);
+  const aportes = useMemo(()=>calcAportes(lanc,sLim,saldosBancarios,rds),[lanc,sLim,saldosBancarios,rds]);
   const bc = useMemo(()=>queue.filter(function(d){
     if(d.status!=='pendente') return false;
     if(!user) return false;
@@ -6959,10 +6942,40 @@ function App() {
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
-        tab==='aportes'&&e(TabAportes,{lanc,aportes,rds,user,sMap,sLim,onClosePeriod:()=>{setLanc([]);toast.success('✅ Período encerrado!');},onReset:()=>setConfReset(true),toast}),
-        tab==='saldo'&&e(TabSaldoBancario,{lanc:lanc,aportes:aportes,sMap:sMap,sLim:sLim,user:user,toast:toast}),
+        tab==='aportes'&&e(TabAportes,{lanc,aportes,rds,user,sMap,sLim,onClosePeriod:function(){
+          var novosSaldos = {};
+          Object.keys(sLim).forEach(function(setor){
+            var ap = aportes.find(function(a){return a.setor===setor;});
+            if(ap){
+              novosSaldos[setor] = {sldInicial:Math.max(0,(ap.totalSaidas||0)-(ap.pc||0)),saques:0};
+            }
+          });
+          setSaldosBancarios(novosSaldos);
+          setLanc([]); setRds([]);
+          toast.success('✅ Período encerrado! D26 calculado automaticamente.');
+        },onReset:()=>setConfReset(true),toast}),
+        tab==='saldo'&&e(TabSaldoBancario,{lanc:lanc,aportes:aportes,sMap:sMap,sLim:sLim,user:user,toast:toast,saldos:saldosBancarios,setSaldos:setSaldosBancarios}),
         tab==='conciliacao'&&e(TabConciliacao,{lanc:lanc,setLanc:setLanc,user:user,sMap:sMap,toast:toast}),
-        tab==='fechamento'&&e(TabFechamento,{lanc,rds,aportes,user,sMap,sLim,toast,onEncerrar:()=>{toast.success('✅ Período encerrado com sucesso!');}}),
+        tab==='fechamento'&&e(TabFechamento,{lanc,rds,aportes,user,sMap,sLim,toast,onEncerrar:function(){
+          // Calcular D26 automático: saldo residual de cada setor vira saldo inicial do próximo período
+          var novosSaldos = {};
+          Object.keys(sLim).forEach(function(setor){
+            var ap = aportes.find(function(a){return a.setor===setor;});
+            if(ap){
+              // D26 = saques do extrato - PC aprovado (saldo físico em caixa)
+              var d26 = Math.max(0, (ap.totalSaidas||0) - (ap.pc||0));
+              novosSaldos[setor] = {
+                sldInicial: d26,
+                saques: 0, // zerado para o novo período
+              };
+            }
+          });
+          setSaldosBancarios(novosSaldos);
+          // Limpar lançamentos e RDs do período encerrado
+          setLanc([]);
+          setRds([]);
+          toast.success('✅ Período encerrado! D26 calculado automaticamente para todos os setores.');
+        }}),
         tab==='admin'&&e(TabAdmin,{users,setUsers,sMap,setSMap,sLim,setSLim,companies:comp,setCompanies:setComp,currentUser:user,toast}),
       )
     )
