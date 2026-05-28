@@ -2919,6 +2919,36 @@ function EditCell({value,onSave,mono}) {
     value||'PENDENTE');
 }
 
+// ── FI: Campo de input do formulário de lançamento
+// IMPORTANTE: definido FORA do TabLancamento para evitar
+// que seja recriado a cada digitação (causaria perda de foco)
+function FI({label,k,type,span,placeholder,required,hi,mono,formData,onUpd,aiFields,setAiFields}) {
+  var t = type || 'text';
+  var auto = aiFields ? aiFields.has(k) : false;
+  var locked = auto && AI_LOCK;
+  return e(Fld,{label:label,required:required,span:span},
+    e(TI,{
+      value: formData ? (formData[k]||'') : '',
+      onChange: function(v) {
+        if(locked) return;
+        if(onUpd) onUpd(k,v);
+        if(setAiFields) setAiFields(function(p){var n=new Set(p);n.delete(k);return n;});
+      },
+      type:t, placeholder:placeholder, hi:hi||auto, mono:mono,
+      readOnly:locked,
+      style: auto ? {
+        borderColor: locked ? C.blue : C.blue+'88',
+        background: C.blueBg,
+        cursor: locked ? 'not-allowed' : 'text',
+        opacity: locked ? 0.85 : 1
+      } : {}
+    }),
+    auto && e('span',{style:{fontSize:9,color:C.blue}},
+      locked ? '🔒 Preenchido pelo OCR — somente leitura' : '✨ Preenchido pelo OCR'
+    )
+  );
+}
+
 // ── LANÇAMENTO MANUAL ──────────────────────────────────────────────────────────
 function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue}) {
   const dS = (!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'';
@@ -3026,31 +3056,8 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
     },700);
   }
 
-  function FI({label,k,type='text',span,placeholder,required,hi,mono}) {
-    var auto = af.has(k);
-    var locked = auto && AI_LOCK;
-    return e(Fld,{label,required,span},
-      e(TI,{
-        value:f[k],
-        onChange:function(v){
-          if(locked) return; // bloqueado quando AI_LOCK=true
-          upd(k,v);
-          setAf(function(p){var n=new Set(p);n.delete(k);return n;});
-        },
-        type,placeholder,hi:hi||auto,mono,
-        readOnly:locked,
-        style:auto ? {
-          borderColor: locked ? C.blue : C.blue+'88',
-          background: C.blueBg,
-          cursor: locked ? 'not-allowed' : 'text',
-          opacity: locked ? 0.85 : 1
-        } : {}
-      }),
-      auto && e('span',{style:{fontSize:9,color:C.blue}},
-        locked ? '🔒 Preenchido pelo OCR — somente leitura' : '✨ Preenchido pelo OCR'
-      )
-    );
-  }
+  // FI: usa o componente global FI passando formData e onUpd como props
+  function FIf(props) { return e(FIf, Object.assign({}, props, {formData:f, onUpd:upd, aiFields:aiFields, setAiFields:setAiFields})); }
 
   return e('div',{className:'au'},
     e(Card,null,
@@ -3116,26 +3123,26 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14,marginBottom:14}},
           e(Fld,{label:'Setor *'},e(SI,{value:f.setor,onChange:v=>{upd('setor',v);upd('portador','');},options:allSec})),
           e(Fld,{label:'Empresa *'},e(SI,{value:f.empresa,onChange:v=>upd('empresa',v),options:companies})),
-          e(FI,{label:'Data',k:'data',type:'date'}),
+          e(FIf,{label:'Data',k:'data',type:'date'}),
           e(Fld,{label:'Portador *'},e(SI,{value:f.portador,onChange:v=>upd('portador',v),options:ports,disabled:!f.setor})),
           e(Fld,{label:'Tipo'},e(SI,{value:f.tipo,onChange:v=>upd('tipo',v),options:[{value:'SAÍDA',label:'SAÍDA (Pagamento/NF)'},{value:'ENTRADA',label:'ENTRADA (Saque/Reforço)'}]})),
-          e(FI,{label:'Valor (R$)',k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
-          e(FI,{label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
-          e(FI,{label:'Cód. Fornecedor TOTVS',k:'cod_fornec',placeholder:'Ex: 92.130',mono:true}),
-          e(FI,{label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
+          e(FIf,{label:'Valor (R$)',k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
+          e(FIf,{label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
+          e(FIf,{label:'Cód. Fornecedor TOTVS',k:'cod_fornec',placeholder:'Ex: 92.130',mono:true}),
+          e(FIf,{label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
 /* ID Datasul - oculto até integração TOTVS */
-          e(FI,{label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
-          e(FI,{label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
-          e(FI,{label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
-          e(FI,{label:'Nº requisição',k:'num_requisicao',placeholder:'Ex: REQ-123',mono:true}),
+          e(FIf,{label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
+          e(FIf,{label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
+          e(FIf,{label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
+          e(FIf,{label:'Nº requisição',k:'num_requisicao',placeholder:'Ex: REQ-123',mono:true}),
           // ── Campos novos: EMS, Item, SGP, Histórico, Tipo Doc ───────────
-          e(FI,{label:'Nº E.M.S',k:'num_ems',placeholder:'Ex: 150.208',mono:true}),
-          e(FI,{label:'Nº Item',k:'num_item',placeholder:'Ex: 910.0001',mono:true}),
-          e(FI,{label:'Nº SGP',k:'num_sgp',placeholder:'Ex: 910.0001',mono:true}),
+          e(FIf,{label:'Nº E.M.S',k:'num_ems',placeholder:'Ex: 150.208',mono:true}),
+          e(FIf,{label:'Nº Item',k:'num_item',placeholder:'Ex: 910.0001',mono:true}),
+          e(FIf,{label:'Nº SGP',k:'num_sgp',placeholder:'Ex: 910.0001',mono:true}),
           e(Fld,{label:'Tipo de documento'},e(SI,{value:f.tipo_doc,onChange:v=>upd('tipo_doc',v),options:[
             '','Cupom Fiscal','NF-e','NFS-e','Recibo (Aplicativos Transportes / Ifood)','Recibo Uber/99','DUA','DARF','Recibo'
           ]})),
-          e(FI,{label:'Histórico',k:'historico',placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO',span:2})
+          e(FIf,{label:'Histórico',k:'historico',placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO',span:2})
         ),
         e(Fld,{label:'Documento fiscal'},
           e('label',{style:{display:'block',cursor:'pointer'}},
