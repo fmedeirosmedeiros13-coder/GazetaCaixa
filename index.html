@@ -2922,10 +2922,10 @@ function EditCell({value,onSave,mono}) {
 // ── FI: Campo de input do formulário de lançamento
 // IMPORTANTE: definido FORA do TabLancamento para evitar
 // que seja recriado a cada digitação (causaria perda de foco)
-function FI({label,k,type,span,placeholder,required,hi,mono,formData,onUpd,aiFields,setAiFields}) {
+function FI({label,k,type,span,placeholder,required,hi,mono,readOnly,formData,onUpd,aiFields,setAiFields}) {
   var t = type || 'text';
   var auto = aiFields ? aiFields.has(k) : false;
-  var locked = auto && AI_LOCK;
+  var locked = (auto && AI_LOCK) || readOnly;
   return e(Fld,{label:label,required:required,span:span},
     e(TI,{
       value: formData ? (formData[k]||'') : '',
@@ -2941,6 +2941,11 @@ function FI({label,k,type,span,placeholder,required,hi,mono,formData,onUpd,aiFie
         background: C.blueBg,
         cursor: locked ? 'not-allowed' : 'text',
         opacity: locked ? 0.85 : 1
+      } : readOnly ? {
+        borderColor: C.green+'88',
+        background: C.greenBg,
+        cursor: 'not-allowed',
+        opacity: 0.9
       } : {}
     }),
     auto && e('span',{style:{fontSize:9,color:C.blue}},
@@ -2953,6 +2958,23 @@ function FI({label,k,type,span,placeholder,required,hi,mono,formData,onUpd,aiFie
 function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue}) {
   const dS = (!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'';
   const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''});
+  const [useFX, setUseFX] = useState(false);
+  const [moedaFX, setMoedaFX] = useState('USD');
+  const [valorFX, setValorFX] = useState('');
+  const [cotacaoFX, setCotacaoFX] = useState('5.71');
+  var COTACOES_FX = {USD:'5.71',EUR:'6.18',GBP:'7.23',ARS:'0.0058',CLP:'0.0061',PYG:'0.00075'};
+  var MOEDAS_FX = [
+    {v:'USD',l:'🇺🇸 USD — Dólar americano'},
+    {v:'EUR',l:'🇪🇺 EUR — Euro'},
+    {v:'GBP',l:'🇬🇧 GBP — Libra esterlina'},
+    {v:'ARS',l:'🇦🇷 ARS — Peso argentino'},
+    {v:'CLP',l:'🇨🇱 CLP — Peso chileno'},
+    {v:'PYG',l:'🇵🇾 PYG — Guarani paraguaio'},
+  ];
+  function calcFX(vfx, cot) {
+    var n = parseFloat(String(vfx).replace(',','.')) * parseFloat(String(cot).replace(',','.'));
+    return isNaN(n) ? '' : n.toFixed(2);
+  }
   const [modeloM, setModeloM] = useState(false); // modal de seleção de modelo
   const [fu,setFu] = useState(null);
   const [load,setLoad] = useState(false);
@@ -3025,6 +3047,9 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
     setTimeout(()=>{
       var item = {id:uid(),data:isoToBR(f.data),setor:f.setor,portador:f.portador,
         local:f.local.toUpperCase(),valor:parseFloat(f.valor),tipo:f.tipo,empresa:f.empresa,
+        moeda_fx: useFX ? moedaFX : null,
+        valor_fx: useFX && valorFX ? parseFloat(valorFX) : null,
+        cotacao_fx: useFX && cotacaoFX ? parseFloat(cotacaoFX) : null,
         cod_fornec:f.cod_fornec,num_nf:f.num_nf,centro_custo:f.centro_custo,
         conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,num_requisicao:f.num_requisicao,
         id_datasul:f.id_datasul,
@@ -3052,6 +3077,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         toast.success('✓ Lançamento registrado!');
       }
       setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''}));
+      setUseFX(false); setValorFX(''); setCotacaoFX('5.71'); setMoedaFX('USD');
       setFu(null);setAf(new Set());setLoad(false);
     },700);
   }
@@ -3126,7 +3152,71 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           FIf({label:'Data',k:'data',type:'date'}),
           e(Fld,{label:'Portador *'},e(SI,{value:f.portador,onChange:v=>upd('portador',v),options:ports,disabled:!f.setor})),
           e(Fld,{label:'Tipo'},e(SI,{value:f.tipo,onChange:v=>upd('tipo',v),options:[{value:'SAÍDA',label:'SAÍDA (Pagamento/NF)'},{value:'ENTRADA',label:'ENTRADA (Saque/Reforço)'}]})),
-          FIf({label:'Valor (R$)',k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true}),
+          // ── Toggle moeda estrangeira ───────────────────────────────────────────
+          e('label',{style:{display:'flex',alignItems:'center',gap:10,cursor:'pointer',
+            marginBottom:12,padding:'8px 12px',borderRadius:8,
+            background:useFX?C.blueBg:'transparent',
+            border:'0.5px solid '+(useFX?C.blue+44:C.border),transition:'all .2s'}},
+            e('input',{type:'checkbox',checked:useFX,onChange:function(ev){
+              var on = ev.target.checked;
+              setUseFX(on);
+              if(!on){ upd('valor',''); setValorFX(''); }
+              else if(valorFX && cotacaoFX) { upd('valor', calcFX(valorFX,cotacaoFX)); }
+            },style:{accentColor:C.blue,width:16,height:16,cursor:'pointer'}}),
+            e('span',{style:{fontSize:12,color:useFX?C.blueHi:C.text2,fontWeight:useFX?500:400}},'💱 Despesa em moeda estrangeira'),
+            useFX&&e('span',{style:{marginLeft:4,fontSize:10,background:C.accent,color:'#fff',padding:'1px 7px',borderRadius:10}},'câmbio ativo')
+          ),
+
+          // ── Campos câmbio (só visível quando toggle ativo) ─────────────────
+          useFX&&e('div',{style:{background:C.blueBg,border:'0.5px solid '+C.blue+'44',borderRadius:10,padding:'12px 14px',marginBottom:12}},
+            e('div',{style:{fontSize:10,fontWeight:700,color:C.blueHi,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:10}},'Conversão de câmbio'),
+            e('div',{style:{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:12,marginBottom:10}},
+              e(Fld,{label:'Moeda estrangeira'},
+                e('select',{value:moedaFX,onChange:function(ev){
+                  var m=ev.target.value;
+                  setMoedaFX(m);
+                  var cot=COTACOES_FX[m]||'1.00';
+                  setCotacaoFX(cot);
+                  if(valorFX) upd('valor', calcFX(valorFX, cot));
+                },style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 10px',color:C.text0,width:'100%',fontSize:12}},
+                  MOEDAS_FX.map(function(m){ return e('option',{key:m.v,value:m.v},m.l); })
+                )
+              ),
+              e(Fld,{label:'Valor ('+moedaFX+')'},
+                e('input',{type:'number',value:valorFX,step:'0.01',min:'0',
+                  placeholder:'0.00',
+                  onChange:function(ev){
+                    var v=ev.target.value;
+                    setValorFX(v);
+                    if(v && cotacaoFX) upd('valor', calcFX(v, cotacaoFX));
+                    else upd('valor','');
+                  },
+                  style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 10px',color:C.text0,width:'100%',fontSize:12,fontFamily:C.mono}})
+              ),
+              e(Fld,{label:'Cotação (R$/'+moedaFX+')'},
+                e('input',{type:'number',value:cotacaoFX,step:'0.0001',min:'0',
+                  onChange:function(ev){
+                    var c=ev.target.value;
+                    setCotacaoFX(c);
+                    if(valorFX && c) upd('valor', calcFX(valorFX, c));
+                  },
+                  style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 10px',color:C.text0,width:'100%',fontSize:12,fontFamily:C.mono}})
+              )
+            ),
+            f.valor&&e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',
+              background:C.bg1,borderRadius:6,padding:'8px 12px',marginTop:4}},
+              e('span',{style:{fontSize:11,color:C.text2}},
+                (MOEDAS_FX.find(function(m){return m.v===moedaFX;})||{l:moedaFX}).l.split('—')[0].trim()+
+                ' '+parseFloat(valorFX||0).toFixed(2)+' × R$ '+parseFloat(cotacaoFX||0).toFixed(4)
+              ),
+              e('span',{style:{fontFamily:C.mono,fontWeight:600,fontSize:14,color:C.green}},'= R$ '+parseFloat(f.valor||0).toFixed(2))
+            )
+          ),
+
+          // ── Campo Valor em R$ ──────────────────────────────────────────────
+          FIf({label:useFX?'Valor total (R$) — calculado automaticamente':'Valor (R$)',
+            k:'valor',type:'text',placeholder:'0,00',required:true,hi:!f.valor,mono:true,
+            readOnly: useFX && !!valorFX}),
           FIf({label:'Fornecedor / Estabelecimento *',k:'local',placeholder:'Ex: Posto Shell',required:true,span:2}),
           FIf({label:'Cód. Fornecedor TOTVS',k:'cod_fornec',placeholder:'Ex: 92.130',mono:true}),
           FIf({label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
