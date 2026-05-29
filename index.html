@@ -309,7 +309,7 @@ function firebaseCreateUser(email, password, profile, callback) {
   _auth.createUserWithEmailAndPassword(email, password)
     .then(function(cred) {
       var userData = Object.assign({}, profile, {uid: cred.user.uid, email: email});
-      _db.collection('users').doc(cred.user.uid).set(userData)
+      _db.collection('users').doc(cred.user.uid).set(sanitizeForFirebase(userData))
         .then(function() { callback({user: userData}); })
         .catch(function(e) { callback({error: 'Perfil não salvo: '+e.message}); });
     })
@@ -324,28 +324,43 @@ function firebaseCreateUser(email, password, profile, callback) {
 // ── Salvar perfil de usuário no Firestore ──
 function salvarUserProfile(uid, data) {
   if(!_db || !uid) return;
-  _db.collection('users').doc(uid).set(data, {merge: true})
+  _db.collection('users').doc(uid).set(sanitizeForFirebase(data), {merge: true})
     .catch(function(e){ console.error('Erro ao salvar perfil:', e); });
 }
 
 // Salvar lançamento no Firestore
+
+// ── Sanitizador: Firebase rejeita 'undefined', usar 'null' ──────────────────
+function sanitizeForFirebase(obj) {
+  if(obj === undefined) return null;
+  if(obj === null || typeof obj !== 'object') return obj;
+  if(Array.isArray(obj)) return obj.map(sanitizeForFirebase);
+  var out = {};
+  Object.keys(obj).forEach(function(k){
+    var v = obj[k];
+    if(v !== undefined) out[k] = (v && typeof v==='object') ? sanitizeForFirebase(v) : v;
+    else out[k] = null;
+  });
+  return out;
+}
+
 function salvarLancamento(item) {
   if(!_db) return;
-  _db.collection('lancamentos').doc(item.id).set(item)
+  _db.collection('lancamentos').doc(item.id).set(sanitizeForFirebase(item))
     .catch(function(e){ console.error('Erro ao salvar lançamento:', e); });
 }
 
 // Salvar RD no Firestore
 function salvarRD(rd) {
   if(!_db) return;
-  _db.collection('rds').doc(rd.id).set(Object.assign({}, rd, {_ts: Date.now()}))
+  _db.collection('rds').doc(rd.id).set(sanitizeForFirebase(Object.assign({}, rd, {_ts: Date.now()})))
     .catch(function(e){ console.error('Erro ao salvar RD:', e); });
 }
 
 // Salvar item na fila (Caixa de Entrada)
 function salvarQueue(item) {
   if(!_db) return;
-  _db.collection('queue').doc(item.id).set(item)
+  _db.collection('queue').doc(item.id).set(sanitizeForFirebase(item))
     .catch(function(e){ console.error('Erro ao salvar queue:', e); });
 }
 
@@ -470,6 +485,21 @@ var RD_STATUS = {
   APROVADO:  'aprovado',
   DEVOLVIDO: 'devolvido',
 };
+
+// ── TOTVS workflow ──────────────────────────────────────────────────────────
+// Campos TOTVS — podem ser preenchidos DEPOIS de criar o RD (workflow real)
+var CAMPOS_TOTVS = ['cod_fornec','num_ordem','num_ems','num_item','num_sgp','conta_contabil','centro_custo'];
+
+// Verifica se um lançamento tem TODOS os campos TOTVS preenchidos
+function temTOTVS(l) {
+  if(!l) return false;
+  return CAMPOS_TOTVS.every(function(c){ return l[c] && String(l[c]).trim()!==''; });
+}
+// Conta quantos campos TOTVS faltam
+function totvsFaltantes(l) {
+  if(!l) return CAMPOS_TOTVS.length;
+  return CAMPOS_TOTVS.filter(function(c){ return !l[c] || String(l[c]).trim()===''; }).length;
+}
 
 // Numeração global de RDs — busca do Firebase ou usa mock
 var RD_COUNTER_KEY = 'gz_rd_counter';
@@ -1499,7 +1529,7 @@ function MobileCapture(props){
           centro_custo:'', conta_contabil:'', id_datasul:'',
           auditStatus: imgUrl?'aguardando_conferencia':'aguardando_doc_fiscal',
           iaStatus:'AMARELO',
-          documento_fiscal_url:imgUrl||undefined,
+          documento_fiscal_url:imgUrl||null,
           operador_nome:user.name
         });
         setTimeout(function(){setPhase('done');},300);
@@ -1862,14 +1892,14 @@ function TabCaptura({user, sMap, companies, onAdd, toast, isMobile, onAddQueue})
         local:(f.local||'ESTABELECIMENTO').toUpperCase(),valor:val,tipo:f.tipo,empresa:f.empresa||'S/A A GAZETA',
         num_nf:f.num_nf,cod_fornec:f.cod_fornec,centro_custo:'',conta_contabil:'',id_datasul:'',
         auditStatus:imgUrl?'aguardando_conferencia':'aguardando_doc_fiscal',
-        iaStatus:'AMARELO',documento_fiscal_url:imgUrl||undefined,operador_nome:user.name};
+        iaStatus:'AMARELO',documento_fiscal_url:imgUrl||null,operador_nome:user.name};
       if(isMobile && onAddQueue){
         var qi={id:item.id,setor:item.setor,portador:item.portador,
           descricao:item.local,status:'pendente',capturedBy:item.operador_nome,
           timestamp:new Date().toISOString(),aiAlerts:[],irregularidade:false,isAuditing:false,
           image:imgUrl||null,documento_fiscal_url:imgUrl||null,
           valor:val,local:item.local,num_nf:f.num_nf,data:item.data,empresa:item.empresa||'S/A A GAZETA',
-          cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''};
+          cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:''};
         onAddQueue(qi);
       } else {
         onAdd(item);
@@ -2642,13 +2672,13 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
       )
     ),
 
-    // ── KPI CARDS — valores corretos ─────────────────────────────────────────
+    // ── KPI CARDS — seguem a fórmula de fluxo de caixa ───────────────────────
     e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:18}},
       [
-        {l:'Limite de utilização',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+a.limite;},0)),c:C.blue,tip:'Soma dos limites de todos os setores visíveis'},
-        {l:'Saldo bancário D25',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.disponivel||0);},0)),c:C.green,tip:'Saldo bancário no último dia do período'},
-        {l:'Saldo físico em caixa',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.saldo_caixa||0);},0)),c:tot.sl>0?C.amber:C.green,tip:'Dinheiro em poder dos setores ainda sem PC'},
-        {l:'Pendência de PC',v:'R$ '+fmt(pendenciaPC),c:pendenciaPC>0?C.red:C.green,tip:'Valor sacado sem comprovante ou RD aprovado'},
+        {l:'Saldo Inicial (D26)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.sldInicial||0);},0)),c:'#06b6d4',tip:'Saldo herdado do período anterior'},
+        {l:'+ Entradas (Saques)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.saques||0);},0)),c:C.blue,tip:'Total de saques/entradas do período (extrato)'},
+        {l:'− Saídas (PC/Despesas)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.pc||0);},0)),c:C.green,tip:'Prestações de contas aprovadas (RDs)'},
+        {l:'= Saldo Final de Caixa',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.sldFinal||0);},0)),c:tot.sl<0?C.red:C.blueHi,tip:'O que deve sobrar fisicamente no caixa'},
       ].map(function(m){return e('div',{key:m.l,title:m.tip,style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:8,padding:'13px 16px',cursor:'default'}},
         e('div',{style:{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:5}},m.l),
         e('div',{style:{fontSize:20,fontWeight:500,color:m.c,fontFamily:C.mono}},m.v)
@@ -2772,22 +2802,20 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
     // Auditoria
     // ── VISÃO DA FOLHA ────────────────────────────────────────────────────
     e(Card,{style:{marginBottom:0}},
-      e(CardHdr,{title:'Visão de Caixa — Folha por Setor',icon:'📋',
-        sub:'Sld Final = Disponível − PC  |  Aporte = PC prestado  |  Sem PC = sem aporte'}),
+      e(CardHdr,{title:'Visão de Caixa',icon:'📋',
+        sub:'Saldo Final de Caixa = Saldo Inicial + Entradas (Aportes/Saques/Visa Electron) − Saídas (Prestações de Contas/Despesas)'}),
       e('div',{style:{overflowX:'auto'}},
         e('table',null,
           e('thead',null,e('tr',null,
             ...[
               {l:'Setor',           bg:C.bg3,    c:C.text1},
-              {l:'Limite',          bg:C.bg3,    c:C.text2,    r:true},
-              {l:'Sld Inicial',     bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'+ Saques',        bg:'#0c2030',c:'#06b6d4',  r:true},
+              {l:'Limite (info)',   bg:C.bg3,    c:C.text2,    r:true},
+              {l:'Saldo Inicial',   bg:'#0c2030',c:'#06b6d4',  r:true},
+              {l:'+ Entradas',      bg:'#0c2030',c:'#06b6d4',  r:true},
               {l:'= Disponível',    bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'PC Aprovado (RDs)',bg:C.greenBg,c:C.green,   r:true},
-              {l:'Saldo em Caixa',  bg:C.bg3,    c:C.amber,    r:true},
-              {l:'Sld Final D25',   bg:C.blueBg, c:C.blueHi,  r:true},
-              {l:'Aporte (=PC)',    bg:C.redBg,  c:C.red,     r:true},
-              {l:'Status',          bg:C.redBg,  c:C.text2,   center:true},
+              {l:'− Saídas (PC)',   bg:C.greenBg,c:C.green,   r:true},
+              {l:'= Saldo Final de Caixa',bg:C.blueBg, c:C.blueHi,  r:true},
+              {l:'Status',          bg:C.bg3,    c:C.text2,   center:true},
             ].map(h=>e('th',{key:h.l,style:{
               padding:'8px 12px',textAlign:h.center?'center':h.r?'right':'left',
               fontSize:9,color:h.c,textTransform:'uppercase',letterSpacing:'.05em',
@@ -2812,22 +2840,13 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
                   e('div',null,'R$ '+fmt(a.pc||0)),
                   a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' aprovado'+(a.qtdRDs>1?'s':''))
                 ),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,
-                  color:a.saldo_caixa>0?C.amber:C.text2}},
-                  a.saldo_caixa>0?e('div',null,
-                    e('div',null,'R$ '+fmt(a.saldo_caixa)),
-                    e('div',{style:{fontSize:8,color:C.amber,marginTop:1}},'saldo em caixa')
-                  ):e('span',{style:{color:C.text2}},'—')
+                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,fontWeight:700,color:isNeg?C.red:C.blue,background:C.blueBg}},
+                  e('div',null,'R$ '+fmt(a.sldFinal||0)),
+                  a.sldFinal>0&&e('div',{style:{fontSize:8,color:C.blueHi,marginTop:1,fontWeight:400}},'sobra no caixa')
                 ),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,fontWeight:700,color:isNeg?C.red:C.blue,background:C.blueBg}},'R$ '+fmt(a.sldFinal||0)),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',background:C.redBg}},
-                  a.pc>0?e('div',{style:{fontFamily:C.mono,fontSize:13,fontWeight:700,color:C.red}},'R$ '+fmt(a.pc)):
-                  semRD?e('div',{style:{fontFamily:C.mono,fontSize:11,color:C.amber}},'Aguardando RD'):
-                  e('span',{style:{color:C.text2}},'—')
-                ),
-                e('td',{style:{padding:'10px 12px',textAlign:'center',background:C.redBg}},
+                e('td',{style:{padding:'10px 12px',textAlign:'center'}},
                   e(Badge,{color:corBadge},
-                    semRD?'Sem RD': isNeg?'Negativo': isOk?'PC OK': isSemMov?'Sem mov.':'Aporte'
+                    semRD?'Sem RD': isNeg?'Negativo': isOk?'PC OK': isSemMov?'Sem mov.':'Pendente'
                   )
                 )
               );
@@ -2839,11 +2858,9 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
             e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:600,background:'#06b6d408'}},'R$ '+fmt(tot.saques||0)),
             e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text0,fontWeight:700,background:'#06b6d408'}},'R$ '+fmt(tot.disponivel||0)),
             e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,fontWeight:700,background:C.green+'06'}},'R$ '+fmt(tot.pc||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.amber,fontWeight:600,background:C.green+'06'}},'R$ '+fmt(tot.pe||0)),
-            e('td',{colSpan:2,style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,color:tot.sl<0?C.red:C.blue,fontWeight:700,background:C.blueBg}},'R$ '+fmt(tot.sl||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,color:tot.ap>0?C.red:C.green,fontWeight:700,background:C.redBg}},'R$ '+fmt(tot.ap||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'center',background:C.redBg}},
-              e(Badge,{color:tot.ap>0?'red':'green'},tot.ap>0?'Aportes pendentes':'Tudo OK')
+            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,color:tot.sl<0?C.red:C.blue,fontWeight:700,background:C.blueBg}},'R$ '+fmt(tot.sl||0)),
+            e('td',{style:{padding:'10px 12px',textAlign:'center'}},
+              e(Badge,{color:tot.sl<0?'red':'green'},tot.sl<0?'Atenção':'Tudo OK')
             )
           ))
         )
@@ -2957,7 +2974,25 @@ function FI({label,k,type,span,placeholder,required,hi,mono,readOnly,formData,on
 // ── LANÇAMENTO MANUAL ──────────────────────────────────────────────────────────
 function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue}) {
   const dS = (!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'';
-  const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''});
+  const [f,setF] = useState({setor:dS,empresa:user.defaultCompany||'',data:todayISO(),portador:user.name||'',funcionario:user.name||'',tipo:'SAÍDA',valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''});
+  // Históricos salvos pelo usuário (persistem no localStorage)
+  const [historicosSalvos, setHistoricosSalvos] = useState(function(){
+    try { return JSON.parse(localStorage.getItem('gz_historicos_salvos')||'["ALIMENTAÇÃO","LOCOMOÇÃO","HOSPEDAGEM","COMBUSTÍVEL","MATERIAL DE ESCRITÓRIO"]'); } catch(e){ return []; }
+  });
+  function salvarHistorico(){
+    var h = (f.historico||'').trim().toUpperCase();
+    if(!h) { toast.error('Digite um histórico primeiro.'); return; }
+    if(historicosSalvos.includes(h)) { toast.info('Histórico já cadastrado.'); return; }
+    var novos = historicosSalvos.concat([h]);
+    setHistoricosSalvos(novos);
+    try { localStorage.setItem('gz_historicos_salvos', JSON.stringify(novos)); } catch(e){}
+    toast.success('✅ Histórico cadastrado!');
+  }
+  function removerHistorico(h){
+    var novos = historicosSalvos.filter(function(x){return x!==h;});
+    setHistoricosSalvos(novos);
+    try { localStorage.setItem('gz_historicos_salvos', JSON.stringify(novos)); } catch(e){}
+  }
   const [useFX, setUseFX] = useState(false);
   const [moedaFX, setMoedaFX] = useState('USD');
   const [valorFX, setValorFX] = useState('');
@@ -2986,6 +3021,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
   const [fieldErrors,setFieldErrors] = useState({});
   const [af,setAf] = useState(new Set());
   const fRef = useRef();
+  const fileInputRef = useRef(null); // ref do input file para resetar após upload (bug do anexo)
   const upd = (k,v)=>setF(p=>({...p,[k]:v}));
   const ports = f.setor&&sMap[f.setor]?sMap[f.setor]:[];
   const allSec = user.hasGlobalAccess?Object.keys(sMap):user.allowedSectors.filter(s=>s!=='TODOS');
@@ -3041,8 +3077,13 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
 
   function handleSubmit() {
     if(!f.setor||!f.portador||!f.valor||!f.local||!f.empresa){toast.error('Preencha os campos obrigatórios (*).'); return;}
-    // No mobile: campos TOTVS não são obrigatórios — vai para Caixa de Entrada
+    // Workflow TOTVS: campos podem ser completados DEPOIS de criar o RD
     /* validação cod_fornec desativada - campo oculto até integração TOTVS */
+    var lancTemp = {cod_fornec:f.cod_fornec,num_ordem:f.num_ordem,num_ems:f.num_ems,num_item:f.num_item,num_sgp:f.num_sgp,conta_contabil:f.conta_contabil,centro_custo:f.centro_custo};
+    var faltantes = totvsFaltantes(lancTemp);
+    if(faltantes > 0) {
+      toast.info('💡 Lançamento salvo com '+faltantes+' campo(s) TOTVS pendentes — complete depois pelo botão ✏️ no RD.');
+    }
     setLoad(true);
     setTimeout(()=>{
       var item = {id:uid(),data:isoToBR(f.data),setor:f.setor,portador:f.portador,
@@ -3051,11 +3092,11 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         valor_fx: useFX && valorFX ? parseFloat(valorFX) : null,
         cotacao_fx: useFX && cotacaoFX ? parseFloat(cotacaoFX) : null,
         cod_fornec:f.cod_fornec,num_nf:f.num_nf,centro_custo:f.centro_custo,
-        conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,num_requisicao:f.num_requisicao,
+        conta_contabil:f.conta_contabil,num_ordem:f.num_ordem,funcionario:f.funcionario||'',
         id_datasul:f.id_datasul,
         num_ems:f.num_ems||'',num_item:f.num_item||'',num_sgp:f.num_sgp||'',
         historico:f.historico||'',tipo_doc:f.tipo_doc||'',auditStatus:fu?'aguardando_conferencia':'aguardando_doc_fiscal',
-        iaStatus:'AMARELO',documento_fiscal_url:fu||undefined,operador_nome:user.name};
+        iaStatus:'AMARELO',documento_fiscal_url:fu||null,operador_nome:user.name};
       if(isMobile && onAddQueue) {
         // Mobile → vai para Caixa de Entrada para conferência
         var queueItem = {
@@ -3068,7 +3109,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           valor: item.valor, local: item.local, num_nf: item.num_nf,
           data: item.data, empresa: item.empresa,
           cod_fornec: '', id_datasul: '', centro_custo: '',
-          conta_contabil: '', num_ordem: '', num_requisicao: '',
+          conta_contabil: '', num_ordem: '',
         };
         onAddQueue(queueItem);
       } else {
@@ -3076,9 +3117,11 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
         onAdd(item);
         toast.success('✓ Lançamento registrado!');
       }
-      setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''}));
+      setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',id_datasul:'',num_ems:'',num_item:'',num_sgp:'',historico:'',tipo_doc:''}));
       setUseFX(false); setValorFX(''); setCotacaoFX('5.71'); setMoedaFX('USD');
       setFu(null);setAf(new Set());setLoad(false);
+      // Resetar o input file para permitir anexar novo cupom (bug corrigido)
+      if(fileInputRef.current) fileInputRef.current.value = '';
     },700);
   }
 
@@ -3120,7 +3163,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                       centro_custo:l.centro_custo||prev.centro_custo,
                       conta_contabil:l.conta_contabil||prev.conta_contabil,
                       num_ordem:   l.num_ordem||prev.num_ordem,
-                      num_requisicao:l.num_requisicao||prev.num_requisicao,
+                      funcionario:l.funcionario||prev.funcionario,
                       id_datasul:  l.id_datasul||prev.id_datasul,
                       num_ems:     l.num_ems||prev.num_ems,
                       num_item:    l.num_item||prev.num_item,
@@ -3221,23 +3264,42 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           FIf({label:'Cód. Fornecedor TOTVS',k:'cod_fornec',placeholder:'Ex: 92.130',mono:true}),
           FIf({label:'Nº nota fiscal',k:'num_nf',placeholder:'Ex: 497480',mono:true}),
 /* ID Datasul - oculto até integração TOTVS */
+          FIf({label:'Funcionário (quem usou)',k:'funcionario',placeholder:'Ex: '+(user.name||'Nome do funcionário')}),
           FIf({label:'Centro de custo',k:'centro_custo',placeholder:'Ex: 210101',mono:true}),
           FIf({label:'Conta contábil',k:'conta_contabil',placeholder:'Ex: 510201',mono:true}),
           FIf({label:'Nº da ordem',k:'num_ordem',placeholder:'Ex: 98765',mono:true}),
-          FIf({label:'Nº requisição',k:'num_requisicao',placeholder:'Ex: REQ-123',mono:true}),
-          // ── Campos novos: EMS, Item, SGP, Histórico, Tipo Doc ───────────
+          // ── Campos: EMS, Item, SGP, Tipo Doc, Histórico ───────────
           FIf({label:'Nº E.M.S',k:'num_ems',placeholder:'Ex: 150.208',mono:true}),
           FIf({label:'Nº Item',k:'num_item',placeholder:'Ex: 910.0001',mono:true}),
           FIf({label:'Nº SGP',k:'num_sgp',placeholder:'Ex: 910.0001',mono:true}),
           e(Fld,{label:'Tipo de documento'},e(SI,{value:f.tipo_doc,onChange:v=>upd('tipo_doc',v),options:[
             '','Cupom Fiscal','NF-e','NFS-e','Recibo (Aplicativos Transportes / Ifood)','Recibo Uber/99','DUA','DARF','Recibo'
           ]})),
-          FIf({label:'Histórico',k:'historico',placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO',span:2})
+          e(Fld,{label:'Histórico',span:2},
+            e('div',{style:{display:'flex',gap:6}},
+              e('select',{
+                value:f.historico||'',
+                onChange:function(ev){upd('historico',ev.target.value);},
+                style:{flex:'0 0 auto',minWidth:160,background:C.bg2,border:'1px solid '+C.border,borderRadius:6,padding:'8px 10px',color:C.text0,fontSize:12,cursor:'pointer'}
+              },
+                e('option',{value:''},'— Selecionar salvo —'),
+                historicosSalvos.map(function(h){return e('option',{key:h,value:h},h);})
+              ),
+              e(TI,{value:f.historico,onChange:function(v){upd('historico',v);},placeholder:'Digite ou selecione',style:{flex:1}}),
+              e('button',{
+                onClick:salvarHistorico,
+                type:'button',
+                title:'Cadastrar como histórico padrão',
+                style:{flex:'0 0 auto',background:C.greenBg,border:'1px solid '+C.green,color:C.green,padding:'8px 12px',borderRadius:6,cursor:'pointer',fontSize:12,fontWeight:500,whiteSpace:'nowrap'}
+              },'💾 Cadastrar')
+            )
+          )
         ),
         e(Fld,{label:'Documento fiscal'},
           e('label',{style:{display:'block',cursor:'pointer'}},
             e('input',{
               type:'file',
+              ref:fileInputRef,
               accept:'image/*,application/pdf',
               style:{display:'none'},
               onChange:function(ev){
@@ -3379,7 +3441,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
                       style:{display:'block',margin:'0 auto',borderRadius:8,
                         border:'1px solid '+C.border,objectFit:'contain'}}),
                     e('button',{
-                      onClick:function(ev){ev.preventDefault();ev.stopPropagation();setFu(null);setAf(new Set());},
+                      onClick:function(ev){ev.preventDefault();ev.stopPropagation();setFu(null);setAf(new Set());if(fileInputRef.current)fileInputRef.current.value='';},
                       style:{position:'absolute',top:6,right:6,background:C.red,border:'none',
                         color:'#fff',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:11}
                     },'✕ Remover')
@@ -3396,7 +3458,7 @@ function TabLancamento({user,sMap,companies,lanc,onAdd,toast,isMobile,onAddQueue
           )
         ),
         e('div',{style:{display:'flex',justifyContent:'flex-end',gap:10,marginTop:16,paddingTop:14,borderTop:'1px solid '+C.border}},
-          e(Btn,{onClick:()=>{setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:'',id_datasul:''}));setFu(null);setAf(new Set());}},'🗑 Limpar'),
+          e(Btn,{onClick:()=>{setF(p=>({...p,valor:'',local:'',cod_fornec:'',num_nf:'',centro_custo:'',conta_contabil:'',num_ordem:'',id_datasul:''}));setFu(null);setAf(new Set());if(fileInputRef.current)fileInputRef.current.value='';}},'🗑 Limpar'),
           e(Btn,{variant:'primary',onClick:handleSubmit,disabled:load},load?e(React.Fragment,null,e(Spin,{s:14}),' Registrando...'):'📤 Sincronizar lançamento')
         )
       )
@@ -3820,7 +3882,7 @@ function TabImport({onBatchAdd,sMap,toast}) {
 function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
   const [sel,setSel] = useState(null);
   const [f,setF] = useState({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',
-    cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
+    cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:''});
   const [fu,setFu] = useState(null);
   const [lupaOpen,setLupaOpen] = useState(false);
   const fRef = useRef();
@@ -3843,7 +3905,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
       portador: doc.portador ||'',
       empresa:  doc.empresa  ||'S/A A GAZETA',
       cod_fornec:'', id_datasul:'', centro_custo:'',
-      conta_contabil:'', num_ordem:'', num_requisicao:''
+      conta_contabil:'', num_ordem:''
     });
   }
 
@@ -3866,10 +3928,9 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
       centro_custo:f.centro_custo,
       conta_contabil:f.conta_contabil,
       num_ordem:f.num_ordem,
-      num_requisicao:f.num_requisicao,
       auditStatus:sel.irregularidade?'pendente_auditoria':'conciliado',
       iaStatus:sel.irregularidade?'VERMELHO':'VERDE',
-      documento_fiscal_url:fu||undefined,
+      documento_fiscal_url:fu||null,
       operador_nome:user.name,
       conferido_por:user.name,
     });
@@ -3877,7 +3938,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
     atualizarQueue(sel.id, {status:'processado'});
     toast.success('✓ Lançamento confirmado e registrado!');
     setSel(null);
-    setF({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:'',num_requisicao:''});
+    setF({num_nf:'',valor:'',local:'',data:'',portador:'',empresa:'',cod_fornec:'',id_datasul:'',centro_custo:'',conta_contabil:'',num_ordem:''});
     setFu(null);
   }
 
@@ -4017,9 +4078,7 @@ function TabInbox({queue,setQueue,user,sMap,companies,onAdd,toast,isMobile}) {
               e(Fld,{label:'Nº da Ordem'},
                 e(TI,{value:f.num_ordem,onChange:v=>upd('num_ordem',v),placeholder:'Ex: 98765',mono:true})
               ),
-              e(Fld,{label:'Nº Requisição'},
-                e(TI,{value:f.num_requisicao,onChange:v=>upd('num_requisicao',v),placeholder:'Ex: REQ-123',mono:true})
-              )
+/* Nº Requisição removido - duplicado com E.M.S */
             )
           ),
 
@@ -4107,6 +4166,7 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
   const [fDtIni,setFDtIni] = useState('');
   const [fDtFim,setFDtFim] = useState('');
   const [vUrl,setVUrl] = useState(null);
+  const [editLanc,setEditLanc] = useState(null); // lançamento em edição
   const allSec = user.hasGlobalAccess?Object.keys(sMap):user.allowedSectors.filter(s=>s!=='TODOS');
   const [dtIniAtivo,setDtIniAtivo] = useState('');
   const [dtFimAtivo,setDtFimAtivo] = useState('');
@@ -4164,6 +4224,36 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
   return e('div',{className:'au'},
     e(Modal,{open:!!vUrl,onClose:()=>setVUrl(null),title:'Visualizar documento'},
       vUrl&&e('img',{src:vUrl,alt:'doc',style:{width:'100%',borderRadius:8}})
+    ),
+    // ── Modal editar lançamento ─────────────────────────────────────────────
+    e(Modal,{open:!!editLanc,onClose:()=>setEditLanc(null),title:'Editar lançamento',width:680},
+      editLanc&&e('div',null,
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}},
+          e(Fld,{label:'Data'},e(TI,{value:editLanc.data||'',onChange:v=>setEditLanc(p=>({...p,data:v})),placeholder:'DD/MM/AAAA',mono:true})),
+          e(Fld,{label:'Valor (R$)'},e(TI,{value:String(editLanc.valor||''),onChange:v=>setEditLanc(p=>({...p,valor:v})),mono:true})),
+          e(Fld,{label:'Tipo'},e(SI,{value:editLanc.tipo||'SAÍDA',onChange:v=>setEditLanc(p=>({...p,tipo:v})),options:['SAÍDA','ENTRADA']})),
+          e(Fld,{label:'Fornecedor/Estabelecimento',span:2},e(TI,{value:editLanc.local||'',onChange:v=>setEditLanc(p=>({...p,local:v}))})),
+          e(Fld,{label:'Nº NF'},e(TI,{value:editLanc.num_nf||'',onChange:v=>setEditLanc(p=>({...p,num_nf:v})),mono:true})),
+          e(Fld,{label:'Centro de custo'},e(TI,{value:editLanc.centro_custo||'',onChange:v=>setEditLanc(p=>({...p,centro_custo:v})),mono:true})),
+          e(Fld,{label:'Conta contábil'},e(TI,{value:editLanc.conta_contabil||'',onChange:v=>setEditLanc(p=>({...p,conta_contabil:v})),mono:true})),
+          e(Fld,{label:'Nº ordem'},e(TI,{value:editLanc.num_ordem||'',onChange:v=>setEditLanc(p=>({...p,num_ordem:v})),mono:true})),
+          e(Fld,{label:'Nº E.M.S'},e(TI,{value:editLanc.num_ems||'',onChange:v=>setEditLanc(p=>({...p,num_ems:v})),mono:true})),
+          e(Fld,{label:'Nº Item'},e(TI,{value:editLanc.num_item||'',onChange:v=>setEditLanc(p=>({...p,num_item:v})),mono:true})),
+          e(Fld,{label:'Nº SGP'},e(TI,{value:editLanc.num_sgp||'',onChange:v=>setEditLanc(p=>({...p,num_sgp:v})),mono:true})),
+          e(Fld,{label:'Tipo de documento'},e(SI,{value:editLanc.tipo_doc||'',onChange:v=>setEditLanc(p=>({...p,tipo_doc:v})),options:['','Cupom Fiscal','NF-e','NFS-e','Recibo (Aplicativos Transportes / Ifood)','Recibo Uber/99','DUA','DARF','Recibo']})),
+          e(Fld,{label:'Histórico',span:3},e(TI,{value:editLanc.historico||'',onChange:v=>setEditLanc(p=>({...p,historico:v})),placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO'}))
+        ),
+        e('div',{style:{display:'flex',justifyContent:'flex-end',gap:10,marginTop:8}},
+          e(Btn,{onClick:()=>setEditLanc(null)},'Cancelar'),
+          e(Btn,{variant:'primary',onClick:function(){
+            var atualizado = Object.assign({},editLanc,{valor:parseFloat(String(editLanc.valor).replace(',','.'))||0});
+            setLanc(p=>p.map(l=>l.id===atualizado.id?atualizado:l));
+            if(typeof salvarLancamento==='function') salvarLancamento(atualizado);
+            toast.success('✅ Lançamento atualizado!');
+            setEditLanc(null);
+          }},'💾 Salvar alterações')
+        )
+      )
     ),
     e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:16}},
       [{l:'Total registros',v:fil.length,c:C.text0},{l:'Total entradas',v:'R$ '+fmt(tE),c:C.green},{l:'Total saídas',v:'R$ '+fmt(tS),c:C.red},{l:'Saldo líquido',v:'R$ '+fmt(tE-tS),c:tE>=tS?C.blue:C.red}].map(m=>
@@ -4272,6 +4362,7 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
               e(TD,null,e(ABadge,{status:item.auditStatus})),
               e(TD,null,e('div',{style:{display:'flex',gap:4}},
                 item.documento_fiscal_url&&e(Btn,{size:'sm',onClick:()=>setVUrl(item.documento_fiscal_url)},'👁'),
+                e(Btn,{size:'sm',onClick:()=>setEditLanc(Object.assign({},item))},'✏️'),
                 e(Btn,{size:'sm',variant:'danger',onClick:()=>{if(window.confirm('Remover registro?'))setLanc(p=>p.filter(l=>l.id!==item.id));deletarLancamento(item.id);;}},'🗑')
               ))
             )),
@@ -4285,7 +4376,8 @@ function TabDatabase({lanc,setLanc,user,sMap,toast}) {
 }
 
 // ── MEUS RDS ───────────────────────────────────────────────────────────────────
-function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
+function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
+  var [editLancRD,setEditLancRD] = useState(null); // edição de lançamento dentro do RD
   const isA = user.hasGlobalAccess||user.role==='ADMIN';
   const [etapa,setEtapa] = useState(null);
   const [novoRD,setNovoRD] = useState(null);
@@ -4343,12 +4435,21 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
     var rd=etapa;
     var rdLanc=lanc.filter(function(l){return rd.lancamentos.includes(l.id);});
     var temReembolso=rdLanc.some(function(l){return l.empresa&&l.empresa!=='TV GAZETA';});
+    // Contar lançamentos com TOTVS incompleto
+    var lancsTotvsPendente = rdLanc.filter(function(l){return !temTOTVS(l);}).length;
+    var totalLancs = rdLanc.length;
     return e('div',{className:'au'},
       e('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:16}},
         e(Btn,{onClick:()=>setEtapa(null)},'← Voltar'),
         e('div',{style:{flex:1}},
           e('div',{style:{fontSize:15,fontWeight:500,color:C.text0}},'RD-'+rd.numero+' — '+rd.gerencia),
           e('div',{style:{fontSize:11,color:C.text2}},'CC '+rd.centro_custo+' · '+rd.empresa+' · '+rd.data_emissao)
+        ),
+        lancsTotvsPendente>0&&e('div',{style:{background:C.amberDim,border:'1px solid '+C.amber,borderRadius:6,padding:'4px 10px',fontSize:11,color:C.amber,fontWeight:500}},
+          '📋 '+lancsTotvsPendente+' de '+totalLancs+' com TOTVS pendente'
+        ),
+        lancsTotvsPendente===0&&totalLancs>0&&e('div',{style:{background:C.greenBg,border:'1px solid '+C.green,borderRadius:6,padding:'4px 10px',fontSize:11,color:C.green,fontWeight:500}},
+          '✅ TOTVS completo'
         ),
         rdBadge(rd.status),
         e(Btn,{size:'sm',onClick:()=>window.print()},'🖨 PDF')
@@ -4363,18 +4464,71 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
         e(CardHdr,{title:'Lançamentos do RD-'+rd.numero,icon:'📄'}),
         rdLanc.length===0?e(Empty,{icon:'📄',title:'Nenhum lançamento vinculado',sub:'Edite o RD para adicionar lançamentos.'}):
         e('div',{style:{overflowX:'auto'}},
-          e('table',null,
-            e('thead',null,e('tr',null,e(TH,null,'Data'),e(TH,null,'Tipo doc'),e(TH,null,'Fornecedor/Estabelecimento'),e(TH,null,'Funcionário'),e(TH,null,'Empresa'),e(TH,{right:true},'Valor'),e(TH,null,''))),
+          e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+            e('thead',null,e('tr',null,
+              ...['Data doc fiscal','Conta/Natureza','Tipo Docto','Nº Documento','Valor','Funcionário','Nº E.M.S','Nº Ordem','Nº Item','Nº SGP','Histórico','Ações'].map(function(h,hi){
+                return e('th',{key:h,style:{padding:'7px 10px',textAlign:hi===4?'right':(hi===11?'center':'left'),
+                  fontSize:9,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',
+                  background:C.bg2,borderBottom:'1px solid '+C.border,whiteSpace:'nowrap'}},h);
+              })
+            )),
             e('tbody',null, rdLanc.map(function(l){
               var outEmp = l.empresa&&l.empresa!=='TV GAZETA';
-              return e('tr',{key:l.id,style:{borderBottom:'1px solid '+C.border+'22'}},
-                e('td',{style:{padding:'8px 14px',fontFamily:C.mono,fontSize:12,color:C.text2}},l.data),
-                e(TD,null,e('span',{style:{background:C.bg3,padding:'2px 6px',borderRadius:4,fontSize:10}},l.num_nf?'NF':'Comprovante')),
-                e(TD,{style:{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.local),
-                e(TD,null,l.portador||'—'),
-                e(TD,null,outEmp?e('span',{style:{color:C.amber,fontSize:11,fontWeight:500}},l.empresa):e('span',{style:{color:C.text2,fontSize:11}},'TV Gazeta')),
-                e(TD,{right:true,mono:true,bold:true,style:{color:C.red}},'R$ '+fmt(l.valor)),
-                e(TD,null,outEmp&&e('span',{style:{fontSize:10,color:C.amber,padding:'1px 6px',border:'1px solid '+C.amber,borderRadius:10}},'Reembolso'))
+              var natureza = l.conta_contabil ? l.conta_contabil+(l.historico?' - '+l.historico:'') : (l.historico||'—');
+              // Status TOTVS do lançamento
+              var temTotvs = temTOTVS(l);
+              var faltantesTotvs = totvsFaltantes(l);
+              // Edição/exclusão completa: apenas em rascunho ou devolvido
+              var podeEditar = rd.status===RD_STATUS.RASCUNHO || rd.status===RD_STATUS.DEVOLVIDO;
+              // Edição APENAS TOTVS: liberada SEMPRE (mesmo enviado/aprovado)
+              var podeCompletarTOTVS = !temTotvs;
+              return e('tr',{key:l.id,style:{borderBottom:'1px solid '+C.border+'22',background:outEmp?C.amber+'08':'transparent'}},
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2,whiteSpace:'nowrap'}},l.data),
+                e('td',{style:{padding:'7px 10px',maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},natureza),
+                e('td',{style:{padding:'7px 10px',whiteSpace:'nowrap'}},
+                  e('span',{style:{background:outEmp?C.amberDim:C.bg3,color:outEmp?C.amber:C.blueHi,padding:'1px 6px',borderRadius:4,fontSize:10}},l.tipo_doc||(l.num_nf?'NF-e':'Comprovante'))
+                ),
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_nf||'—'),
+                e('td',{style:{padding:'7px 10px',textAlign:'right',fontFamily:C.mono,fontWeight:600,color:C.red,whiteSpace:'nowrap'}},'R$ '+fmt(l.valor)),
+                e('td',{style:{padding:'7px 10px',color:C.text1,whiteSpace:'nowrap'}},l.funcionario||l.portador||l.operador_nome||'—'),
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_ems||'—'),
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_ordem||'—'),
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_item||'—'),
+                e('td',{style:{padding:'7px 10px',fontFamily:C.mono,color:C.text2}},l.num_sgp||'—'),
+                e('td',{style:{padding:'7px 10px',color:C.text2,fontSize:10,maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.historico||'—'),
+                e('td',{style:{padding:'7px 10px',textAlign:'center',whiteSpace:'nowrap'}},
+                  podeEditar?
+                    // Modo edição completa (rascunho/devolvido): edita tudo + remove
+                    e('div',{style:{display:'inline-flex',gap:4}},
+                      e('button',{
+                        onClick:function(){setEditLancRD(Object.assign({},l,{_modoTOTVS:false}));},
+                        title:'Editar lançamento',
+                        style:{background:C.bg3,border:'1px solid '+C.border,color:C.blueHi,padding:'3px 7px',borderRadius:4,cursor:'pointer',fontSize:11}
+                      },'✏️'),
+                      e('button',{
+                        onClick:function(){
+                          if(!window.confirm('Remover este lançamento do RD?\n\nO comprovante volta para a lista de lançamentos disponíveis.')) return;
+                          setRds(function(p){return p.map(function(r){
+                            if(r.id!==rd.id) return r;
+                            return Object.assign({},r,{lancamentos:r.lancamentos.filter(function(x){return x!==l.id;})});
+                          });});
+                          toast.info('Lançamento removido do RD.');
+                        },
+                        title:'Remover do RD',
+                        style:{background:C.redBg,border:'1px solid '+C.red+'44',color:C.red,padding:'3px 7px',borderRadius:4,cursor:'pointer',fontSize:11}
+                      },'🗑️')
+                    )
+                  :
+                    // Modo TOTVS-only (enviado/aprovado): só completar dados TOTVS
+                    podeCompletarTOTVS ?
+                      e('button',{
+                        onClick:function(){setEditLancRD(Object.assign({},l,{_modoTOTVS:true}));},
+                        title:'Completar dados TOTVS (Cód. Forn., Nº Ordem, EMS, Item, SGP, Conta)',
+                        style:{background:C.amberDim,border:'1px solid '+C.amber,color:C.amber,padding:'3px 8px',borderRadius:4,cursor:'pointer',fontSize:10,fontWeight:600,whiteSpace:'nowrap'}
+                      },'📋 Completar TOTVS')
+                    :
+                      e('span',{title:'TOTVS completo',style:{color:C.green,fontSize:14}},'✅')
+                )
               );
             }))
           )
@@ -4383,7 +4537,59 @@ function TabMeusRDs({user,rds,setRds,lanc,sMap,toast,setTab}) {
           e('span',{style:{fontSize:12,color:C.text2}},rdLanc.length+' lançamentos'),
           e('span',{style:{fontSize:16,fontWeight:500,fontFamily:C.mono,color:C.text0}},'Total: R$ '+fmt(rd.total))
         )
-      )
+      ),
+      // ── Modal editar lançamento do RD ──────────────────────────────────────
+      editLancRD&&(function(){
+        var modoTOTVS = editLancRD._modoTOTVS===true;
+        var ro = modoTOTVS; // readonly nos campos básicos quando modo TOTVS-only
+        return e(Modal,{open:true,onClose:function(){setEditLancRD(null);},
+          title: modoTOTVS ? '📋 Completar dados TOTVS' : 'Editar lançamento',
+          width:680
+        },
+          e('div',null,
+            modoTOTVS&&e('div',{style:{background:C.amberDim,border:'1px solid '+C.amber+'66',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:12,color:C.amber,lineHeight:1.5}},
+              '💡 Este lançamento está em um RD já enviado/aprovado. Apenas os ',
+              e('strong',null,'dados TOTVS'),
+              ' (Cód. Fornecedor, Nº Ordem, EMS, Item, SGP, Conta Contábil e Centro de Custo) podem ser preenchidos. Os demais campos estão bloqueados.'
+            ),
+            e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}},
+              // Campos básicos (bloqueados em modo TOTVS-only)
+              e(Fld,{label:'Data'+(ro?' 🔒':'')},e(TI,{value:editLancRD.data||'',readOnly:ro,onChange:function(v){if(!ro)setEditLancRD(function(p){return Object.assign({},p,{data:v});});},placeholder:'DD/MM/AAAA',mono:true,style:ro?{opacity:.55,cursor:'not-allowed'}:{}})),
+              e(Fld,{label:'Valor (R$)'+(ro?' 🔒':'')},e(TI,{value:String(editLancRD.valor||''),readOnly:ro,onChange:function(v){if(!ro)setEditLancRD(function(p){return Object.assign({},p,{valor:v});});},mono:true,style:ro?{opacity:.55,cursor:'not-allowed'}:{}})),
+              e(Fld,{label:'Funcionário'+(ro?' 🔒':'')},e(TI,{value:editLancRD.funcionario||editLancRD.portador||'',readOnly:ro,onChange:function(v){if(!ro)setEditLancRD(function(p){return Object.assign({},p,{funcionario:v});});},style:ro?{opacity:.55,cursor:'not-allowed'}:{}})),
+              e(Fld,{label:'Fornecedor/Estabelecimento'+(ro?' 🔒':''),span:2},e(TI,{value:editLancRD.local||'',readOnly:ro,onChange:function(v){if(!ro)setEditLancRD(function(p){return Object.assign({},p,{local:v});});},style:ro?{opacity:.55,cursor:'not-allowed'}:{}})),
+              e(Fld,{label:'Nº NF'+(ro?' 🔒':'')},e(TI,{value:editLancRD.num_nf||'',readOnly:ro,onChange:function(v){if(!ro)setEditLancRD(function(p){return Object.assign({},p,{num_nf:v});});},mono:true,style:ro?{opacity:.55,cursor:'not-allowed'}:{}}))
+            ),
+            // Bloco TOTVS — destacado
+            e('div',{style:{background:modoTOTVS?C.amber+'08':'transparent',border:modoTOTVS?'1px solid '+C.amber+'44':'none',borderRadius:8,padding:modoTOTVS?12:0,marginBottom:12}},
+              modoTOTVS&&e('div',{style:{fontSize:10,fontWeight:700,color:C.amber,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:10}},'🗄️ Dados TOTVS — preencha aqui'),
+              e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+                e(Fld,{label:'Cód. Fornecedor TOTVS'},e(TI,{value:editLancRD.cod_fornec||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{cod_fornec:v});});},placeholder:'Ex: 92.130',mono:true})),
+                e(Fld,{label:'Centro de custo'},e(TI,{value:editLancRD.centro_custo||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{centro_custo:v});});},placeholder:'Ex: 2600',mono:true})),
+                e(Fld,{label:'Conta contábil'},e(TI,{value:editLancRD.conta_contabil||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{conta_contabil:v});});},placeholder:'Ex: 311200',mono:true})),
+                e(Fld,{label:'Nº ordem'},e(TI,{value:editLancRD.num_ordem||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{num_ordem:v});});},placeholder:'Ex: 98765',mono:true})),
+                e(Fld,{label:'Nº E.M.S'},e(TI,{value:editLancRD.num_ems||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{num_ems:v});});},placeholder:'Ex: 150.208',mono:true})),
+                e(Fld,{label:'Nº Item'},e(TI,{value:editLancRD.num_item||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{num_item:v});});},placeholder:'Ex: 910.0001',mono:true})),
+                e(Fld,{label:'Nº SGP'},e(TI,{value:editLancRD.num_sgp||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{num_sgp:v});});},placeholder:'Ex: 910.0001',mono:true})),
+                e(Fld,{label:'Histórico',span:2},e(TI,{value:editLancRD.historico||'',onChange:function(v){setEditLancRD(function(p){return Object.assign({},p,{historico:v});});},placeholder:'Ex: ALIMENTAÇÃO, LOCOMOÇÃO'}))
+              )
+            ),
+            e('div',{style:{display:'flex',justifyContent:'flex-end',gap:10,marginTop:8}},
+              e(Btn,{onClick:function(){setEditLancRD(null);}},'Cancelar'),
+              e(Btn,{variant:'primary',onClick:function(){
+                var atualizado = Object.assign({},editLancRD);
+                delete atualizado._modoTOTVS;
+                atualizado.valor = parseFloat(String(atualizado.valor).replace(',','.'))||0;
+                if(setLanc) setLanc(function(p){return p.map(function(l){return l.id===atualizado.id?atualizado:l;});});
+                if(typeof salvarLancamento==='function') salvarLancamento(atualizado);
+                if(modoTOTVS && temTOTVS(atualizado)) toast.success('✅ Dados TOTVS completos!');
+                else toast.success('✅ Lançamento atualizado!');
+                setEditLancRD(null);
+              }},modoTOTVS?'💾 Completar TOTVS':'💾 Salvar alterações')
+            )
+          )
+        );
+      })()
     );
   }
 
@@ -6771,7 +6977,7 @@ function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSa
       e('table',{style:{width:'100%',borderCollapse:'collapse'}},
         e('thead',null,
           e('tr',null,
-            ['Setor','Saldo Inicial','Saques','Disponível','Gasto','Conciliado','Pendente','Saldo Atual','Limite','%','Ação'].map(function(h){
+            ['Setor','Saldo Inicial','+ Entradas (Saques)','= Disponível','− Saídas (Despesas)','Conciliado','Pendente','= Saldo Final de Caixa','Ação'].map(function(h){
               return e('th',{key:h,style:{padding:'10px 12px',textAlign:'left',fontSize:10,
                 color:C.text2,textTransform:'uppercase',letterSpacing:'.05em',
                 background:C.bg2,borderBottom:'1px solid '+C.border,whiteSpace:'nowrap'}},h);
@@ -6781,8 +6987,6 @@ function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSa
         e('tbody',null,
           setores.map(function(setor,i){
             var s = getSaldo(setor);
-            var pct = s.limite>0 ? Math.round(s.gastos/s.limite*100) : 0;
-            var cor = pct>90?C.red:pct>70?C.amber:C.green;
             return e('tr',{key:setor,style:{background:i%2===0?C.bg:C.bg2}},
               e('td',{style:{padding:'10px 12px',fontWeight:600,fontSize:12,color:C.text0}},setor),
               e('td',{style:{padding:'10px 12px',fontSize:11,color:C.text1,fontFamily:C.mono}},'R$ '+fmt(s.sldInicial)),
@@ -6794,15 +6998,6 @@ function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSa
                 s.pendente>0?'R$ '+fmt(s.pendente):'—'),
               e('td',{style:{padding:'10px 12px',fontSize:12,fontWeight:700,
                 color:s.saldoAtual<0?C.red:C.green,fontFamily:C.mono}},'R$ '+fmt(s.saldoAtual)),
-              e('td',{style:{padding:'10px 12px',fontSize:11,color:C.text2,fontFamily:C.mono}},'R$ '+fmt(s.limite)),
-              e('td',{style:{padding:'10px 12px'}},
-                e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-                  e('div',{style:{flex:1,height:6,background:C.bg3,borderRadius:3,overflow:'hidden',minWidth:60}},
-                    e('div',{style:{height:'100%',width:Math.min(pct,100)+'%',background:cor,borderRadius:3,transition:'width .3s'}})
-                  ),
-                  e('span',{style:{fontSize:10,color:cor,fontFamily:C.mono,minWidth:30}},pct+'%')
-                )
-              ),
               e('td',{style:{padding:'8px 12px'}},
                 e('button',{
                   onClick:function(){setEditSaldo({setor:setor,
@@ -6997,7 +7192,6 @@ function App() {
           centro_custo: '',
           conta_contabil: '',
           num_ordem: '',
-          num_requisicao: '',
         };
         addQueue(queueItem);
         setShowCapture(false);
@@ -7034,7 +7228,7 @@ function App() {
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
         tab==='apresentacao'&&e(TabManual,{user:user, lanc:lanc}),
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
-        tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,sMap,toast,setTab}),
+        tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,setLanc,sMap,toast,setTab}),
         tab==='fila_rds'&&e(TabFilaRDs,{user,rds,setRds,lanc,sMap,toast}),
         tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile}),
