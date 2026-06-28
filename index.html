@@ -1,4 +1,6 @@
 
+
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1273,10 +1275,10 @@ function useIsMobile(){
 function MobNav(props){
   var tab=props.tab; var setTab=props.setTab; var bc=props.bc; var isAdmin=props.isAdmin;
   var allItems=[
+    {id:'inbox',       icon:'📥',label:'Entrada',badge:bc},
+    {id:'dashboard',   icon:'📊',label:'Conciliação'},
     {id:'lancamento',  icon:'➕',label:'Lançar'},
     {id:'meus_rds',    icon:'📄',label:'Meus RDs'},
-    {id:'dashboard',   icon:'📊',label:'Resumo'},
-    {id:'inbox',       icon:'📥',label:'Entrada',badge:bc},
     {id:'fila_rds',    icon:'📋',label:'Fila RDs',adm:true},
     {id:'admin',       icon:'⚙️',label:'Admin',  adm:true},
   ];
@@ -2135,12 +2137,12 @@ var TABS_ADMIN=["apresentacao","lancamento","dashboard","inbox","meus_rds","fila
 function hasTabAccess(user,tabId){if(!user)return false;if(user.role==="ADMIN"||user.hasGlobalAccess)return true;var tabs=user.allowedTabs||TABS_OPERADOR;return tabs.indexOf(tabId)>-1;}
 
 const NAV = [
-  {id:'apresentacao',l:'Manual do sistema',i:'📘'},
-  {id:'lancamento',l:'Lançar despesa',i:'➕',accent:true},
+  {id:'apresentacao',l:'Manual / políticas',i:'📘'},
+  {id:'inbox',l:'Caixa de entrada',i:'📥',badge:true},
+  {id:'dashboard',l:'Conciliação de caixa',i:'📊'},
+  {id:'lancamento',l:'Lançamentos manuais',i:'➕',accent:true},
   {id:'meus_rds',l:'Meus RDs',i:'📄'},
   {id:'fila_rds',l:'Fila de RDs',i:'📋',adm:true},
-  {id:'dashboard',l:'Consolidado geral',i:'📊'},
-  {id:'inbox',l:'Caixa de entrada',i:'📥',badge:true},
   {id:'database',l:'Banco de dados',i:'🗄️'},
   {id:'aportes',l:'Controle de aportes',i:'💼',adm:true},
   {id:'saldo',l:'Saldo bancário',i:'🏦',adm:true},
@@ -2670,19 +2672,6 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
             cursor:'pointer',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}
         },'✕ Limpar filtros')
       )
-    ),
-
-    // ── KPI CARDS — seguem a fórmula de fluxo de caixa ───────────────────────
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:18}},
-      [
-        {l:'Saldo Inicial (D26)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.sldInicial||0);},0)),c:'#06b6d4',tip:'Saldo herdado do período anterior'},
-        {l:'+ Entradas (Saques)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.saques||0);},0)),c:C.blue,tip:'Total de saques/entradas do período (extrato)'},
-        {l:'− Saídas (PC/Despesas)',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.pc||0);},0)),c:C.green,tip:'Prestações de contas aprovadas (RDs)'},
-        {l:'= Saldo Final de Caixa',v:'R$ '+fmt(vAp.reduce(function(s,a){return s+(a.sldFinal||0);},0)),c:tot.sl<0?C.red:C.blueHi,tip:'O que deve sobrar fisicamente no caixa'},
-      ].map(function(m){return e('div',{key:m.l,title:m.tip,style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:8,padding:'13px 16px',cursor:'default'}},
-        e('div',{style:{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:5}},m.l),
-        e('div',{style:{fontSize:20,fontWeight:500,color:m.c,fontFamily:C.mono}},m.v)
-      );})
     ),
 
     // ── FILTRO RÁPIDO TODOS / PENDENTES / OK ─────────────────────────────────
@@ -5807,7 +5796,7 @@ function SectForm({data,onSave,onCancel}) {
 }
 
 // ── APP ROOT ───────────────────────────────────────────────────────────────────
-const TITLES = {apresentacao:'Manual do Sistema',dashboard:'Consolidado geral',lancamento:'Lançar despesa',inbox:'Caixa de entrada',meus_rds:'Meus RDs',fila_rds:'Fila de RDs — Financeiro',database:'Banco de dados',aportes:'Controle de aportes',admin:'Painel administrativo',saldo:'Saldo Bancário por Setor',conciliacao:'Conciliação por Confronto',fechamento:'Fechamento do período',};
+const TITLES = {apresentacao:'Manual / políticas',dashboard:'Conciliação de caixa',lancamento:'Lançamentos manuais',inbox:'Caixa de entrada',meus_rds:'Meus RDs',fila_rds:'Fila de RDs — Financeiro',database:'Banco de dados',aportes:'Controle de aportes',admin:'Painel administrativo',saldo:'Saldo Bancário por Setor',conciliacao:'Conciliação por Confronto',fechamento:'Fechamento do período',};
 
 
 // ═══════════════════════════════════════════════════════════════════════════
