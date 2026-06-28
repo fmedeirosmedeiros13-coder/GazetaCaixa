@@ -4609,7 +4609,7 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
 
     // Etapa 2: Lançamentos
     var step2 = e('div',null,
-      lancDisp.length===0?e(Empty,{icon:'📥',title:'Nenhum lançamento disponível',sub:'Lance despesas primeiro na aba "Lançar despesa".'}):
+      lancDisp.length===0?e(Empty,{icon:'📥',title:'Nenhum lançamento disponível',sub:'Lance despesas primeiro na aba "Lançamentos manuais".'}):
       e('div',null,
         e('div',{style:{fontSize:12,color:C.text2,marginBottom:10}},
           'Selecione os lançamentos para vincular a este RD. Lançamentos de outra empresa geram pendência de reembolso.'
@@ -5955,10 +5955,10 @@ function TabManual({user, lanc}) {
     {id:'intro',      icon:'🏠', label:'Visão Geral'},
     {id:'acesso',     icon:'🔐', label:'Acesso ao Sistema'},
     {id:'fluxo',      icon:'🔄', label:'Fluxo de Trabalho'},
-    {id:'lancamento',    icon:'➕', label:'Lançar despesa (com OCR)'},
+    {id:'lancamento',    icon:'➕', label:'Lançamentos manuais (com OCR)'},
     {id:'lancamento', icon:'➕', label:'Lançamento Manual'},
     {id:'inbox',      icon:'📥', label:'Caixa de Entrada'},
-    {id:'dashboard',  icon:'📊', label:'Consolidado Geral'},
+    {id:'dashboard',  icon:'📊', label:'Conciliação de caixa'},
     {id:'banco',      icon:'🗄️', label:'Banco de Dados'},
     {id:'fechamento', icon:'📅', label:'Fechamento Dia 25'},
     {id:'glossario',  icon:'📖', label:'Glossário'},
@@ -5969,7 +5969,7 @@ function TabManual({user, lanc}) {
     {id:'adm-setores',  icon:'🏢', label:'Setores e Limites', adm:true},
     {id:'adm-aportes',  icon:'💼', label:'Controle de Aportes', adm:true},
     {id:'adm-saldo',    icon:'🏦', label:'Saldo Bancário', adm:true},
-    {id:'adm-concil',   icon:'⚖️', label:'Conciliação + Extrato', adm:true},
+    {id:'adm-concil',   icon:'⚖️', label:'Importar Extrato', adm:true},
   ];
   var todasSecoes = isA ? [...SECOES_USER, ...SECOES_ADM] : SECOES_USER;
 
@@ -6091,6 +6091,21 @@ function TabManual({user, lanc}) {
     );
 
     if(sec==='fluxo') return e('div',null,
+      e('h2',{style:mS.h2},'Fluxo atual de prestação de contas de caixa'),
+      e('p',{style:mS.body},'Visão ponta a ponta do processo, com as responsabilidades divididas em duas raias: o Financeiro e as Áreas (operador do caixa). Algumas etapas ocorrem em paralelo.'),
+      e(DTable,{headers:['#','Responsável','Etapa','O que fazer'],rows:[
+        ['1','Financeiro','Liberação do extrato','Libera o extrato bancário com a utilização do cartão, semanalmente.'],
+        ['2','Áreas','Controle de caixa','Monitora a utilização e as pendências de PC.'],
+        ['3','Áreas','Lançar documento fiscal','Lança o documento fiscal e concilia com o extrato.'],
+        ['4','Áreas','Nota Fiscal','Gera solicitação de compra, ordem e pedido para cada Nota Fiscal.'],
+        ['4b','Áreas','Se Cupom Fiscal / outros','Junta os cupons de mesma natureza e mesmo centro de custo e gera solicitação de compra, ordem e pedido consolidado.'],
+        ['5','Áreas','Meus RDs — incluir','Inclui o documento no RD de Prestação de Contas.'],
+        ['6','Financeiro','Registro no TOTVS','Registra a NF e o RD no TOTVS (NF no RE1001).'],
+        ['7','Financeiro','Baixa no TOTVS','Baixa os títulos no TOTVS — portador caixa.'],
+        ['8','Áreas','Meus RDs — fechamento','Faz o Relatório de Fechamento de caixa.'],
+        ['9','Financeiro','Fechamento mensal','Confere e fecha o Caixa mensal.'],
+      ]}),
+      e(Callout,{type:'info'},'Resumo das raias: o Financeiro libera o extrato e cuida do registro/baixa no TOTVS e do fechamento mensal; as Áreas lançam, conciliam, geram as solicitações de compra/ordem/pedido e montam os RDs.'),
       e('h2',{style:mS.h2},'Jornada completa de um lançamento'),
       e('div',{style:{display:'flex',alignItems:'center',gap:0,flexWrap:'wrap',margin:'16px 0'}},
         [['📷','Foto da NF',''],['→','','arrow'],['🤖','IA lê','blue'],['→','','arrow'],['📥','Caixa Entrada',''],['→','','arrow'],['✍️','Confere','blue'],['→','','arrow'],['🗄️','TOTVS',''],['→','','arrow'],['✅','Registrado','green']].map(function(s,i){
@@ -6233,7 +6248,7 @@ function TabManual({user, lanc}) {
       [['1','Confira a Caixa de Entrada','Aprove todos os documentos pendentes enviados pelos funcionários de campo.'],
        ['2','Resolva pendências no Banco de Dados','Filtre por "Aguardando doc fiscal" e anexe as notas que faltam.'],
        ['3','Verifique lançamentos divergentes','Filtre por "Divergente" e corrija os dados incorretos.'],
-       ['4','Exporte para TOTVS','No Consolidado Geral, clique em "Gerar PDF" para o relatório de prestação.'],
+       ['4','Exporte para TOTVS','Na tela Conciliação de caixa, clique em "Gerar PDF" para o relatório de prestação.'],
       ].map(function(s){return e(Step,{key:s[0],num:s[0],title:s[1],body:s[2]});})
     );
 
@@ -6265,7 +6280,7 @@ function TabManual({user, lanc}) {
          ['🏢','Setores','Configurar setores, portadores e limites mensais de caixa.'],
          ['💼','Controle de Aportes','Visão consolidada do caixa rotativo por setor com fórmula D25.'],
          ['🏦','Saldo Bancário','Saldo disponível por setor com histórico de aportes e barra de utilização.'],
-         ['⚖️','Conciliação','Importa extrato (CSV/Excel/OFX) e cruza com lançamentos do sistema.'],
+         ['📤','Importar Extrato','Importa extrato (CSV/Excel/OFX) e cruza com lançamentos do sistema.'],
          ['📋','Logs','Histórico de todas as ações com data, usuário e detalhes.'],
         ].map(function(c,i){
           return e('div',{key:i,style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:10,padding:'16px'}},
@@ -6332,14 +6347,14 @@ function TabManual({user, lanc}) {
     );
 
     if(sec==='adm-concil') return e('div',null,
-      e('p',{style:mS.body},'A Conciliação unifica o extrato bancário com os lançamentos do sistema. O import do extrato está integrado nesta mesma tela.'),
+      e('p',{style:mS.body},'A tela Importar Extrato unifica o extrato bancário com os lançamentos do sistema. O import do extrato está integrado nesta mesma tela.'),
       e('h2',{style:mS.h2},'Como importar e conciliar'),
-      [['1','Acesse a aba Conciliação','Disponível apenas para ADM.'],
+      [['1','Acesse a aba Importar Extrato','Disponível apenas para ADM.'],
        ['2','Importe o extrato bancário','Clique na área de upload — aceita CSV, TXT, XLS, XLSX, OFX e QFX.'],
        ['3','Selecione o setor (opcional)','Filtre por setor para facilitar o cruzamento.'],
        ['4','Clique em "Iniciar Conciliação"','O sistema faz match automático por data e valor.'],
        ['5','Revise os matches','Verde = match encontrado → clique "Aprovar". Âmbar = sem lançamento → vincule ou cobre o setor.'],
-       ['6','Aprove os matches','Status do lançamento muda para CONCILIADO no Consolidado Geral.'],
+       ['6','Aprove os matches','Status do lançamento muda para CONCILIADO na tela Conciliação de caixa.'],
       ].map(function(s){return e(Step,{key:s[0],num:s[0],title:s[1],body:s[2]});}),
       e(Callout,{type:'info'},'Formatos aceitos no upload: CSV, TXT, XLS, XLSX (Excel), OFX e QFX (padrão bancário).')
     );
@@ -6358,7 +6373,7 @@ function TabManual({user, lanc}) {
       e('div',{style:{display:'flex',alignItems:'center',gap:10}},
         e('span',{style:{fontSize:26}},'📘'),
         e('div',null,
-          e('div',{style:{fontSize:16,fontWeight:700,color:C.text0}},'Manual do Sistema'),
+          e('div',{style:{fontSize:16,fontWeight:700,color:C.text0}},'Manual / políticas'),
           e('div',{style:{fontSize:11,color:C.text2,marginTop:1}},
             isA ? 'Manual do Usuário + Administrador · v8.0' : 'Manual do Usuário · v8.0'
           )
@@ -6529,7 +6544,7 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
         return updated;
       });});
     }
-    toast.success('✅ Lançamento conciliado! Status atualizado no Consolidado.');
+    toast.success('✅ Lançamento conciliado! Status atualizado na Conciliação de caixa.');
   }
 
   function desvincular(extId) {
