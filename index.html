@@ -2146,7 +2146,7 @@ const NAV = [
   {id:'database',l:'Banco de dados',i:'🗄️'},
   {id:'aportes',l:'Controle de aportes',i:'💼',adm:true},
   {id:'saldo',l:'Saldo bancário',i:'🏦',adm:true},
-  {id:'conciliacao',l:'Conciliação',i:'⚖️',adm:true},
+  {id:'conciliacao',l:'Importar Extrato',i:'📤',adm:true},
   {id:'fechamento',l:'Fechamento',i:'🔒',adm:true},
   {id:'admin',l:'Painel admin',i:'⚙️',adm:true},
 ];
@@ -4763,16 +4763,6 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
   var statusLabel={rascunho:'Rascunho',enviado:'Enviado',aprovado:'Aprovado',devolvido:'Devolvido'};
 
   return e('div',{className:'au'},
-    // Cards resumo
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}},
-      [{l:'Total sacado no período',v:'R$ '+fmt(sacado),c:C.red},
-       {l:'Comprovado (RDs aprovados)',v:'R$ '+fmt(comprovado),c:C.green},
-       {l:'Saldo físico em caixa',v:'R$ '+fmt(saldoFisico),c:saldoFisico>0?C.amber:C.green}
-      ].map(function(m){return e('div',{key:m.l,style:{background:C.bg2,border:'1px solid '+C.border,borderRadius:8,padding:'14px 16px'}},
-        e('div',{style:{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:5}},m.l),
-        e('div',{style:{fontSize:22,fontWeight:500,color:m.c,fontFamily:C.mono}},m.v)
-      );})
-    ),
     saldoFisico>200&&e('div',{style:{background:C.amberDim,border:'1px solid '+C.amber,borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:12,color:C.amber}},
       '⚠ Saldo físico de R$ '+fmt(saldoFisico)+' em caixa — apresente os comprovantes ou devolva o valor ao financeiro.'
     ),
@@ -5796,7 +5786,7 @@ function SectForm({data,onSave,onCancel}) {
 }
 
 // ── APP ROOT ───────────────────────────────────────────────────────────────────
-const TITLES = {apresentacao:'Manual / políticas',dashboard:'Conciliação de caixa',lancamento:'Lançamentos manuais',inbox:'Caixa de entrada',meus_rds:'Meus RDs',fila_rds:'Fila de RDs — Financeiro',database:'Banco de dados',aportes:'Controle de aportes',admin:'Painel administrativo',saldo:'Saldo Bancário por Setor',conciliacao:'Conciliação por Confronto',fechamento:'Fechamento do período',};
+const TITLES = {apresentacao:'Manual / políticas',dashboard:'Conciliação de caixa',lancamento:'Lançamentos manuais',inbox:'Caixa de entrada',meus_rds:'Meus RDs',fila_rds:'Fila de RDs — Financeiro',database:'Banco de dados',aportes:'Controle de aportes',admin:'Painel administrativo',saldo:'Saldo Bancário por Setor',conciliacao:'Importar Extrato',fechamento:'Fechamento do período',};
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6635,7 +6625,7 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
   // ── FASE UPLOAD ──────────────────────────────────────────────────────────
   if(fase==='upload') return e('div',{className:'au'},
     e(Card,null,
-      e(CardHdr,{title:'Conciliação por Confronto',icon:'⚖️',
+      e(CardHdr,{title:'Importar Extrato',icon:'📤',
         sub:'Importe o extrato bancário e cruze com os lançamentos do sistema'}),
       e('div',{style:{padding:'24px',maxWidth:760}},
 
