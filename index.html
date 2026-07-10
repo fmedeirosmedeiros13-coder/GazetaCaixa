@@ -1,6 +1,5 @@
 
 
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -2147,7 +2146,8 @@ const NAV = [
   {id:'aportes',l:'Controle de aportes',i:'💼',adm:true},
   {id:'saldo',l:'Saldo bancário',i:'🏦',adm:true},
   {id:'conciliacao',l:'Importar Extrato',i:'📤',adm:true},
-  {id:'fechamento',l:'Fechamento',i:'🔒',adm:true},
+  // Oculto: fechamento por data substitui o encerramento manual (reavaliar aposentadoria)
+  // {id:'fechamento',l:'Fechamento',i:'🔒',adm:true},
   {id:'admin',l:'Painel admin',i:'⚙️',adm:true},
 ];
 
@@ -2464,7 +2464,7 @@ function ScannerModal(props) {
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
-function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
+function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAberturas}) {
   const [fS,setFS] = useState(()=>(!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'');
   const [fP,setFP] = useState('');
   const [aF,setAF] = useState('TODOS');
@@ -2498,6 +2498,70 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
     return true;
   }),[lanc,fS,fP,aF,fPeriodo,fDtIni,fDtFim,user]);
   const vAp = useMemo(()=>aportes.filter(a=>{if(!hasAcc(user,a.setor))return false;if(fS&&a.setor!==fS)return false;return true;}),[aportes,fS,user]);
+
+  // ── CAIXA ENCADEADO ───────────────────────────────────────────────────────
+  // Regra: Saldo inicial do período = abertura + entradas − saídas ANTERIORES à data inicial.
+  // Entradas = linhas do extrato importado (operador_nome inicia com 'Importação'), pela data da linha.
+  // Saídas   = RDs registrados pela área (status ≠ rascunho), pela data de emissão do RD.
+  function parseAny(d){
+    if(!d) return null;
+    if(d instanceof Date) return d;
+    if(/^\d{4}-\d{2}-\d{2}/.test(d)) return new Date(d.substring(0,10)+'T00:00:00');
+    return parseBR(d);
+  }
+  const rangeAtual = useMemo(()=>{
+    if(fPeriodo==='personalizado'){
+      return {ini: fDtIni?new Date(fDtIni+'T00:00:00'):null, fim: fDtFim?new Date(fDtFim+'T23:59:59'):null};
+    }
+    if(fPeriodo&&fPeriodo!=='todos'){var r=periodoRange(fPeriodo);return r?{ini:r.ini,fim:new Date(r.fim.getFullYear(),r.fim.getMonth(),r.fim.getDate(),23,59,59)}:{ini:null,fim:null};}
+    return {ini:null,fim:null}; // 'todos'
+  },[fPeriodo,fDtIni,fDtFim]);
+  const vCx = useMemo(()=>{
+    var setores = allSec.filter(function(s){return !fS||s===fS;});
+    var rdsValidos = (rds||[]).filter(function(r){return r.status!==RD_STATUS.RASCUNHO;});
+    // dedupe por id (garantia extra de não contar o mesmo RD 2x)
+    var vistos={}; rdsValidos = rdsValidos.filter(function(r){if(vistos[r.id])return false;vistos[r.id]=true;return true;});
+    var entradasAll = lanc.filter(function(l){return l.operador_nome&&String(l.operador_nome).indexOf('Importação')===0;});
+    return setores.map(function(setor){
+      var ab = (aberturas&&aberturas[setor])||{valor:0,dataRef:''};
+      var dRef = ab.dataRef?new Date(ab.dataRef+'T00:00:00'):null;
+      var ent = entradasAll.filter(function(l){return l.setor===setor;});
+      var sai = rdsValidos.filter(function(r){return (r.setor||r.gerencia)===setor;});
+      function soma(list, getD, getV, de, ate){
+        return list.reduce(function(s,x){
+          var d=getD(x); if(!d) return s;
+          if(dRef&&d<dRef) return s;           // antes da abertura: fora do encadeamento
+          if(de&&d<de) return s;
+          if(ate&&d>ate) return s;
+          return s+getV(x);
+        },0);
+      }
+      var dIni=rangeAtual.ini, dFim=rangeAtual.fim;
+      var umDiaAntes = dIni?new Date(dIni.getTime()-1):null;
+      // acumulado ANTES do período (até o dia imediatamente anterior)
+      var entAntes = dIni?soma(ent,function(l){return parseAny(l.data);},function(l){return l.valor||0;},null,umDiaAntes):0;
+      var saiAntes = dIni?soma(sai,function(r){return parseAny(r.data_emissao);},function(r){return r.total||0;},null,umDiaAntes):0;
+      var sldInicial = (ab.valor||0) + entAntes - saiAntes;
+      // dentro do período
+      var entPer = soma(ent,function(l){return parseAny(l.data);},function(l){return l.valor||0;},dIni,dFim);
+      var saiPer = soma(sai,function(r){return parseAny(r.data_emissao);},function(r){return r.total||0;},dIni,dFim);
+      var qtdRDs = sai.filter(function(r){var d=parseAny(r.data_emissao);if(!d)return false;if(dRef&&d<dRef)return false;if(dIni&&d<dIni)return false;if(dFim&&d>dFim)return false;return true;}).length;
+      var sldFinal = sldInicial + entPer - saiPer;
+      var semMov = entPer===0&&saiPer===0;
+      var apInfo = aportes.find(function(a){return a.setor===setor;});
+      return {setor:setor, limite:(apInfo&&apInfo.limite)||0, abertura:ab,
+        sldInicial:sldInicial, entradas:entPer, saidas:saiPer, sldFinal:sldFinal,
+        qtdRDs:qtdRDs, semMov:semMov};
+    });
+  },[allSec,fS,rds,lanc,aberturas,rangeAtual,aportes]);
+  const totCx = useMemo(()=>({
+    sldInicial:vCx.reduce(function(s,a){return s+a.sldInicial;},0),
+    entradas:vCx.reduce(function(s,a){return s+a.entradas;},0),
+    saidas:vCx.reduce(function(s,a){return s+a.saidas;},0),
+    sldFinal:vCx.reduce(function(s,a){return s+a.sldFinal;},0),
+  }),[vCx]);
+  const [abModal,setAbModal] = useState(null); // {setor, valor, dataRef}
+
   const ports = useMemo(()=>{let b=fS&&sMap[fS]?sMap[fS]:[...new Set(lanc.filter(l=>hasAcc(user,l.setor)).map(l=>l.portador).filter(Boolean))];return[...new Set(b)].sort();},[fS,lanc,sMap,user]);
   const tot = useMemo(()=>({
     pr:vAp.reduce((s,a)=>s+a.total_gasto,0),
@@ -2514,11 +2578,14 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
   function approve(id){upd(id,'auditStatus','auditado');upd(id,'iaStatus','VERDE');toast.success('✓ Aprovado!');}
   const scanItemAtual = useMemo(()=>scanItem?lanc.find(l=>l.id===scanItem.id)||scanItem:null,[scanItem,lanc]);
   const [filtroStatus,setFiltroStatus] = useState('todos');
-  const vApFiltrado = useMemo(()=>vAp.filter(function(a){
-    if(filtroStatus==='pendentes') return (a.pendencias||0)>0||(a.saldo_caixa||0)>100;
-    if(filtroStatus==='ok') return (a.pendencias||0)===0&&(a.saldo_caixa||0)<=100;
+  // Filtro rápido sobre a nova lógica de caixa encadeado:
+  // pendentes = saldo final negativo OU setor sem abertura definida; ok = o restante
+  const vCxFiltrado = useMemo(()=>vCx.filter(function(a){
+    var pend = a.sldFinal<0 || !a.abertura || !a.abertura.dataRef;
+    if(filtroStatus==='pendentes') return pend;
+    if(filtroStatus==='ok') return !pend;
     return true;
-  }),[vAp,filtroStatus]);
+  }),[vCx,filtroStatus]);
 
   const ATS = [{k:'TODOS',l:'Todos'},{k:'VERDE',l:'✓ Auditados'},{k:'AMARELO',l:'✎ Manuais'},{k:'VERMELHO',l:'✗ Divergentes'}];
 
@@ -2550,6 +2617,24 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
   }
 
   return e('div',{className:'au'},
+    e(Modal,{open:!!abModal,onClose:function(){setAbModal(null);},title:'💰 Saldo de abertura — '+((abModal&&abModal.setor)||''),width:420},
+      abModal&&e('div',null,
+        e('p',{style:{fontSize:12,color:C.text2,marginBottom:12}},'Origem do encadeamento: a partir da data de referência, o sistema calcula os saldos inicial e final pela fórmula Saldo Inicial + Entradas − Saídas.'),
+        e(Fld,{label:'Valor de abertura (R$)'},e(TI,{value:abModal.valor,onChange:function(v){setAbModal(function(p){return {...p,valor:v};});},placeholder:'Ex: 3000,00',mono:true})),
+        e(Fld,{label:'Data de referência'},e('input',{type:'date',value:abModal.dataRef,onChange:function(ev){var v=ev.target.value;setAbModal(function(p){return {...p,dataRef:v};});},
+          style:{width:'100%',background:C.bg2,border:'1px solid '+C.borderHi,borderRadius:6,padding:'8px 12px',fontSize:12,color:C.text0,colorScheme:'dark'}})),
+        e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:14}},
+          e(Btn,{onClick:function(){setAbModal(null);}},'Cancelar'),
+          e(Btn,{variant:'primary',onClick:function(){
+            var val=parseFloat(String(abModal.valor).replace(/\./g,'').replace(',','.'))||0;
+            if(!abModal.dataRef){toast.error('Informe a data de referência.');return;}
+            var novo=Object.assign({},aberturas,{[abModal.setor]:{valor:val,dataRef:abModal.dataRef}});
+            setAberturas(novo); setAbModal(null);
+            toast.success('💰 Abertura de '+abModal.setor+' definida: R$ '+fmt(val)+' em '+abModal.dataRef.split('-').reverse().join('/'));
+          }},'Salvar')
+        )
+      )
+    ),
     e(Modal,{open:!!scanItem,onClose:()=>setScanItem(null),
       title:'📷 Documento Fiscal — '+((scanItemAtual&&scanItemAtual.local)||''),width:800},
       scanItemAtual&&e(ScannerModal,{item:scanItemAtual,onClose:()=>setScanItem(null),
@@ -2792,7 +2877,7 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
     // ── VISÃO DA FOLHA ────────────────────────────────────────────────────
     e(Card,{style:{marginBottom:0}},
       e(CardHdr,{title:'Visão de Caixa',icon:'📋',
-        sub:'Saldo Final de Caixa = Saldo Inicial + Entradas (Aportes/Saques/Visa Electron) − Saídas (Prestações de Contas/Despesas)'}),
+        sub:'Saldo Final = Saldo Inicial + Entradas (extrato importado) − Saídas (RDs registrados). Saldo inicial do período = saldo final do dia anterior à data inicial.'}),
       e('div',{style:{overflowX:'auto'}},
         e('table',null,
           e('thead',null,e('tr',null,
@@ -2801,8 +2886,7 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
               {l:'Limite (info)',   bg:C.bg3,    c:C.text2,    r:true},
               {l:'Saldo Inicial',   bg:'#0c2030',c:'#06b6d4',  r:true},
               {l:'+ Entradas',      bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'= Disponível',    bg:'#0c2030',c:'#06b6d4',  r:true},
-              {l:'− Saídas (PC)',   bg:C.greenBg,c:C.green,   r:true},
+              {l:'− Saídas (RDs)',  bg:C.greenBg,c:C.green,   r:true},
               {l:'= Saldo Final de Caixa',bg:C.blueBg, c:C.blueHi,  r:true},
               {l:'Status',          bg:C.bg3,    c:C.text2,   center:true},
             ].map(h=>e('th',{key:h.l,style:{
@@ -2812,22 +2896,24 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
               whiteSpace:'nowrap',fontWeight:600}},h.l))
           )),
           e('tbody',null,
-            vAp.map(function(a){
-              var semRD   = a.qtdRDs===0 && a.totalSaidas>0;
+            vCxFiltrado.map(function(a){
               var isNeg   = a.sldFinal<0;
-              var isOk    = a.status==='PC OK';
-              var isSemMov= a.status==='Sem movimento';
-              var corBadge= semRD?'amber': isNeg?'red': isOk||isSemMov?'green':'amber';
+              var semAb   = !a.abertura||!a.abertura.dataRef;
+              var corBadge= isNeg?'red': a.semMov?'gray':'green';
               return e('tr',{key:a.setor,style:{borderBottom:'1px solid '+C.border+'22',
-                background:semRD?C.amber+'08':isNeg?C.red+'08':'transparent'}},
-                e('td',{style:{padding:'10px 12px',fontWeight:600,fontSize:12}},a.setor),
+                background:isNeg?C.red+'08':'transparent'}},
+                e('td',{style:{padding:'10px 12px',fontWeight:600,fontSize:12}},
+                  a.setor,
+                  user.hasGlobalAccess&&e('span',{title:'Definir saldo de abertura',onClick:function(){setAbModal({setor:a.setor,valor:String((a.abertura&&a.abertura.valor)||''),dataRef:(a.abertura&&a.abertura.dataRef)||''});},
+                    style:{marginLeft:6,cursor:'pointer',fontSize:11,opacity:.7}},'✏️'),
+                  semAb&&e('div',{style:{fontSize:8,color:C.amber,marginTop:2}},'sem abertura definida')
+                ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text2}},'R$ '+fmt(a.limite)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',background:'#06b6d408'}},'R$ '+fmt(a.sldInicial||0)),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:500,background:'#06b6d408'}},'R$ '+fmt(a.saques||0)),
-                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text0,fontWeight:600,background:'#06b6d408'}},'R$ '+fmt(a.disponivel||0)),
+                e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:500,background:'#06b6d408'}},'R$ '+fmt(a.entradas||0)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,background:C.green+'06'}},
-                  e('div',null,'R$ '+fmt(a.pc||0)),
-                  a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' aprovado'+(a.qtdRDs>1?'s':''))
+                  e('div',null,'R$ '+fmt(a.saidas||0)),
+                  a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' no período')
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,fontWeight:700,color:isNeg?C.red:C.blue,background:C.blueBg}},
                   e('div',null,'R$ '+fmt(a.sldFinal||0)),
@@ -2835,7 +2921,7 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'center'}},
                   e(Badge,{color:corBadge},
-                    semRD?'Sem RD': isNeg?'Negativo': isOk?'PC OK': isSemMov?'Sem mov.':'Pendente'
+                    isNeg?'Negativo': a.semMov?'Sem mov.':'OK'
                   )
                 )
               );
@@ -2843,13 +2929,12 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast}) {
           ),
           e('tfoot',null,e('tr',{style:{borderTop:'2px solid '+C.borderHi,background:C.bg2}},
             e('td',{colSpan:2,style:{padding:'10px 12px',fontSize:11,fontWeight:700}},'Totais'),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',background:'#06b6d408'}},'R$ '+fmt(tot.sldInicial||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:600,background:'#06b6d408'}},'R$ '+fmt(tot.saques||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text0,fontWeight:700,background:'#06b6d408'}},'R$ '+fmt(tot.disponivel||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,fontWeight:700,background:C.green+'06'}},'R$ '+fmt(tot.pc||0)),
-            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,color:tot.sl<0?C.red:C.blue,fontWeight:700,background:C.blueBg}},'R$ '+fmt(tot.sl||0)),
+            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',background:'#06b6d408'}},'R$ '+fmt(totCx.sldInicial||0)),
+            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:600,background:'#06b6d408'}},'R$ '+fmt(totCx.entradas||0)),
+            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,fontWeight:700,background:C.green+'06'}},'R$ '+fmt(totCx.saidas||0)),
+            e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,color:totCx.sldFinal<0?C.red:C.blue,fontWeight:700,background:C.blueBg}},'R$ '+fmt(totCx.sldFinal||0)),
             e('td',{style:{padding:'10px 12px',textAlign:'center'}},
-              e(Badge,{color:tot.sl<0?'red':'green'},tot.sl<0?'Atenção':'Tudo OK')
+              e(Badge,{color:totCx.sldFinal<0?'red':'green'},totCx.sldFinal<0?'Atenção':'Tudo OK')
             )
           ))
         )
@@ -7023,6 +7108,15 @@ function App() {
   const [saved,setSaved] = useState(null);
   const [confReset,setConfReset] = useState(false);
   const [saldosBancarios,setSaldosBancarios] = useState({}); // setor → {sldInicial, saques}
+  // Abertura de caixa (origem do encadeamento): setor → {valor, dataRef 'YYYY-MM-DD'}
+  const [aberturasCaixa,setAberturasCaixa] = useState(function(){
+    try { return JSON.parse(localStorage.getItem('gz_aberturas_caixa')||'{}'); } catch(e){ return {}; }
+  });
+  function salvarAberturasCaixa(novo){
+    setAberturasCaixa(novo);
+    try { localStorage.setItem('gz_aberturas_caixa', JSON.stringify(novo)); } catch(e){}
+    if(window._db) window._db.collection('config').doc('aberturas_caixa').set({map:novo,_ts:Date.now()}).catch(function(){});
+  }
 
   // ── Firebase: inicializar e escutar dados em tempo real ──────────────────
   useEffect(function(){
@@ -7071,6 +7165,16 @@ function App() {
         snap.forEach(function(doc){ items.push(doc.data()); });
         if(items.length > 0) setRds(items);
       }, function(e){ console.error('RDs listener:', e); });
+
+    // Escutar aberturas de caixa (config global)
+    var unsubAb = _db.collection('config').doc('aberturas_caixa')
+      .onSnapshot(function(doc){
+        var d = doc && doc.data();
+        if(d && d.map){
+          setAberturasCaixa(d.map);
+          try { localStorage.setItem('gz_aberturas_caixa', JSON.stringify(d.map)); } catch(e){}
+        }
+      }, function(e){ console.error('Aberturas listener:', e); });
 
     // Escutar usuários
     var unsubUsers = _db.collection('users')
@@ -7224,7 +7328,7 @@ function App() {
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,setLanc,sMap,toast,setTab}),
         tab==='fila_rds'&&e(TabFilaRDs,{user,rds,setRds,lanc,sMap,toast}),
-        tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast}),
+        tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast,rds:rds,aberturas:aberturasCaixa,setAberturas:salvarAberturasCaixa}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
         tab==='aportes'&&e(TabAportes,{lanc,aportes,rds,user,sMap,sLim,onClosePeriod:function(){
