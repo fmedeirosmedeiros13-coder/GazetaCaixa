@@ -2464,7 +2464,7 @@ function ScannerModal(props) {
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
-function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAberturas}) {
+function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAberturas,devolucoes,setDevolucoes,cartoes}) {
   const [fS,setFS] = useState(()=>(!user.hasGlobalAccess&&!user.allowedSectors.includes('TODOS'))?user.allowedSectors[0]||'':'');
   const [fP,setFP] = useState('');
   const [aF,setAF] = useState('TODOS');
@@ -2527,6 +2527,7 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
       var dRef = ab.dataRef?new Date(ab.dataRef+'T00:00:00'):null;
       var ent = entradasAll.filter(function(l){return l.setor===setor;});
       var sai = rdsValidos.filter(function(r){return (r.setor||r.gerencia)===setor;});
+      var dev = (devolucoes||[]).filter(function(d){return d.setor===setor;});
       function soma(list, getD, getV, de, ate){
         return list.reduce(function(s,x){
           var d=getD(x); if(!d) return s;
@@ -2541,19 +2542,23 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
       // acumulado ANTES do período (até o dia imediatamente anterior)
       var entAntes = dIni?soma(ent,function(l){return parseAny(l.data);},function(l){return l.valor||0;},null,umDiaAntes):0;
       var saiAntes = dIni?soma(sai,function(r){return parseAny(r.data_emissao);},function(r){return r.total||0;},null,umDiaAntes):0;
-      var sldInicial = (ab.valor||0) + entAntes - saiAntes;
+      var devAntes = dIni?soma(dev,function(d){return parseAny(d.data);},function(d){return d.valor||0;},null,umDiaAntes):0;
+      var sldInicial = (ab.valor||0) + entAntes - saiAntes - devAntes;
       // dentro do período
       var entPer = soma(ent,function(l){return parseAny(l.data);},function(l){return l.valor||0;},dIni,dFim);
       var saiPer = soma(sai,function(r){return parseAny(r.data_emissao);},function(r){return r.total||0;},dIni,dFim);
+      var devPer = soma(dev,function(d){return parseAny(d.data);},function(d){return d.valor||0;},dIni,dFim);
+      var qtdDev = dev.filter(function(d){var x=parseAny(d.data);if(!x)return false;if(dRef&&x<dRef)return false;if(dIni&&x<dIni)return false;if(dFim&&x>dFim)return false;return true;}).length;
+      saiPer += devPer;
       var qtdRDs = sai.filter(function(r){var d=parseAny(r.data_emissao);if(!d)return false;if(dRef&&d<dRef)return false;if(dIni&&d<dIni)return false;if(dFim&&d>dFim)return false;return true;}).length;
       var sldFinal = sldInicial + entPer - saiPer;
       var semMov = entPer===0&&saiPer===0;
       var apInfo = aportes.find(function(a){return a.setor===setor;});
       return {setor:setor, limite:(apInfo&&apInfo.limite)||0, abertura:ab,
         sldInicial:sldInicial, entradas:entPer, saidas:saiPer, sldFinal:sldFinal,
-        qtdRDs:qtdRDs, semMov:semMov};
+        qtdRDs:qtdRDs, qtdDev:qtdDev, semMov:semMov};
     });
-  },[allSec,fS,rds,lanc,aberturas,rangeAtual,aportes]);
+  },[allSec,fS,rds,lanc,aberturas,devolucoes,rangeAtual,aportes]);
   const totCx = useMemo(()=>({
     sldInicial:vCx.reduce(function(s,a){return s+a.sldInicial;},0),
     entradas:vCx.reduce(function(s,a){return s+a.entradas;},0),
@@ -2561,6 +2566,7 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
     sldFinal:vCx.reduce(function(s,a){return s+a.sldFinal;},0),
   }),[vCx]);
   const [abModal,setAbModal] = useState(null); // {setor, valor, dataRef}
+  const [devModal,setDevModal] = useState(null); // {setor, data, valor, obs}
 
   const ports = useMemo(()=>{let b=fS&&sMap[fS]?sMap[fS]:[...new Set(lanc.filter(l=>hasAcc(user,l.setor)).map(l=>l.portador).filter(Boolean))];return[...new Set(b)].sort();},[fS,lanc,sMap,user]);
   const tot = useMemo(()=>({
@@ -2597,6 +2603,93 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
 
 
   // ── Geração de PDF ──────────────────────────────────────────────────────
+  // Controle de Caixa oficial (layout da planilha de fechamento, 1 página por setor)
+  function gerarControleCaixa() {
+    function esc(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    var hoje = new Date();
+    var dIni = rangeAtual.ini, dFim = rangeAtual.fim;
+    function fD(d){return d?(('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()):null;}
+    var periodoTxt = dIni&&dFim ? fD(dIni)+' a '+fD(dFim) : 'Todos os períodos';
+    var relRef = dFim ? ('0'+(dFim.getMonth()+1)).slice(-2)+'/'+dFim.getFullYear() : ('0'+(hoje.getMonth()+1)).slice(-2)+'/'+hoje.getFullYear();
+    var rdsValidos = (rds||[]).filter(function(r){return r.status!==RD_STATUS.RASCUNHO;});
+    var vistosCC={}; rdsValidos = rdsValidos.filter(function(r){if(vistosCC[r.id])return false;vistosCC[r.id]=true;return true;});
+    function dentro(d, dRef){ if(!d) return false; if(dRef&&d<dRef) return false; if(dIni&&d<dIni) return false; if(dFim&&d>dFim) return false; return true; }
+
+    var paginas = vCxFiltrado.map(function(cx){
+      var setor = cx.setor;
+      var dRef = cx.abertura&&cx.abertura.dataRef ? new Date(cx.abertura.dataRef+'T00:00:00') : null;
+      var conta = (typeof SECTOR_CONTA!=='undefined'&&SECTOR_CONTA[setor])||{};
+      // linhas: cada lançamento dos RDs do setor no período
+      var linhas=[];
+      rdsValidos.filter(function(r){return (r.setor||r.gerencia)===setor && dentro(parseAny(r.data_emissao), dRef);})
+        .forEach(function(r){
+          (r.lancamentos||[]).forEach(function(lid){
+            var l = lanc.find(function(x){return x.id===lid;});
+            if(l) linhas.push({forn:l.local||'', emp:l.empresa||'', saida:l.valor||0, cf:l.cod_fornec||'', nf:l.num_nf||'', cc:l.centro_custo||'', ctb:l.conta_contabil||'', ord:l.num_ordem||'', req:l.id_datasul||''});
+          });
+        });
+      var devs = (devolucoes||[]).filter(function(d){return d.setor===setor && dentro(parseAny(d.data), dRef);});
+      var num=2;
+      var linhasHtml = linhas.map(function(li){
+        num++;
+        return '<tr><td class="c">'+('0'+num).slice(-2)+'</td><td>'+esc(li.forn)+'</td><td>'+esc(li.emp)+'</td><td class="r"></td><td class="r neg">'+fmt(li.saida)+'</td><td class="c">'+esc(li.cf)+'</td><td class="c">'+esc(li.nf)+'</td><td class="c">'+esc(li.cc)+'</td><td class="c">'+esc(li.ctb)+'</td><td class="c">'+esc(li.ord)+'</td><td class="c">'+esc(li.req)+'</td></tr>';
+      }).join('');
+      var devsHtml = devs.map(function(d){
+        num++;
+        return '<tr><td class="c">'+('0'+num).slice(-2)+'</td><td class="b">DEVOLUÇÃO – DEPÓSITO – '+esc(d.data?d.data.split('-').reverse().join('/'):'')+(d.obs?' ('+esc(d.obs)+')':'')+'</td><td></td><td class="r"></td><td class="r">'+fmt(d.valor)+'</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>';
+      }).join('');
+      return '<div class="pagina">'
+        +'<table class="hdr"><tr><td class="titulo" colspan="2">CONTROLE DE CAIXA</td><td class="rel">Relatório: <b>'+esc(relRef)+'</b></td></tr>'
+        +'<tr><td class="k">Nº CARTÃO</td><td colspan="2">'+esc((cartoes&&cartoes[setor])||'—')+'</td></tr>'
+        +'<tr><td class="k">CONTA BANESTES</td><td colspan="2">'+esc(conta.conta||'—')+(conta.nome?' — '+esc(conta.nome):'')+'</td></tr>'
+        +'<tr><td class="k">ÁREA</td><td colspan="2">'+esc(setor)+'</td></tr>'
+        +'<tr><td class="k">RESPONSÁVEL</td><td colspan="2">'+esc((sMap[setor]||[]).join(', ')||'—')+'</td></tr>'
+        +'<tr><td class="k">PERÍODO DE APURAÇÃO</td><td colspan="2">'+esc(periodoTxt)+'</td></tr>'
+        +'<tr><td class="k">DATA DO RELATÓRIO</td><td colspan="2">'+fD(hoje)+'</td></tr></table>'
+        +'<table class="corpo"><thead><tr><th>#</th><th>NOME DO FORNECEDOR</th><th>EMPRESA</th><th>ENTRADAS</th><th>SAÍDAS</th><th>CÓD. FORNEC</th><th>NOTA FISCAL</th><th>CENTRO DE CUSTO</th><th>CONTA CONTÁBIL</th><th>Nº DA ORDEM</th><th>REQUISIÇÃO</th></tr></thead><tbody>'
+        +'<tr><td class="c">01</td><td class="i">Saldo Inicial</td><td></td><td class="r i">'+fmt(cx.sldInicial)+'</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>'
+        +'<tr><td class="c">02</td><td class="i">Saques Conta ('+esc(periodoTxt)+')</td><td></td><td class="r">'+fmt(cx.entradas)+'</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>'
+        +linhasHtml + devsHtml
+        +'</tbody><tfoot>'
+        +'<tr class="tot"><td colspan="3">TOTAIS</td><td class="r">'+fmt(cx.entradas)+'</td><td class="r">'+fmt(cx.saidas)+'</td><td colspan="6"></td></tr>'
+        +'<tr class="sal"><td colspan="3">SALDO ATUAL</td><td class="r" colspan="2">'+fmt(cx.sldFinal)+'</td><td colspan="6"></td></tr>'
+        +'</tfoot></table>'
+        +'<table class="resumo">'
+        +'<tr><td class="s">+</td><td>Saldo Inicial</td><td class="r">'+fmt(cx.sldInicial)+'</td></tr>'
+        +'<tr><td class="s">+</td><td>Reforço de Caixa</td><td class="r">'+fmt(cx.entradas)+'</td></tr>'
+        +'<tr><td class="s">−</td><td>Saídas</td><td class="r neg">'+fmt(cx.saidas)+'</td></tr>'
+        +'<tr class="tl"><td class="s">=</td><td>Total</td><td class="r b">'+fmt(cx.sldFinal)+'</td></tr>'
+        +'</table></div>';
+    }).join('');
+
+    var css = 'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;margin:24px;}'
+      +'.pagina{page-break-after:always;margin-bottom:30px;}'
+      +'table{border-collapse:collapse;width:100%;}'
+      +'.hdr td{border:1px solid #1e3a6e;padding:4px 8px;}'
+      +'.hdr .titulo{background:#0d2b5c;color:#fff;font-weight:bold;text-align:center;font-size:13px;letter-spacing:.08em;}'
+      +'.hdr .rel{background:#0d2b5c;color:#fff;text-align:right;width:160px;}'
+      +'.hdr .k{font-weight:bold;width:190px;background:#f2f5fb;}'
+      +'.corpo{margin-top:8px;}'
+      +'.corpo th{background:#0d2b5c;color:#fff;border:1px solid #1e3a6e;padding:4px 5px;font-size:9px;}'
+      +'.corpo td{border:1px solid #9db1d1;padding:3px 6px;}'
+      +'.corpo .c{text-align:center;} .r{text-align:right;font-family:Consolas,monospace;}'
+      +'.i{font-style:italic;} .b{font-weight:bold;} .neg{color:#c00;}'
+      +'.tot td{background:#d7dde8;font-weight:bold;border:1px solid #9db1d1;padding:4px 6px;}'
+      +'.sal td{background:#0d2b5c;color:#fff;font-weight:bold;border:1px solid #1e3a6e;padding:4px 6px;}'
+      +'.resumo{margin-top:14px;width:300px;}'
+      +'.resumo td{border:1px solid #9db1d1;padding:3px 8px;}'
+      +'.resumo .s{width:20px;text-align:center;font-weight:bold;}'
+      +'.resumo .tl td{border-top:2px solid #0d2b5c;}'
+      +'@media print{.pagina:last-child{page-break-after:auto;}}';
+
+    var w = window.open('','_blank');
+    if(!w){ toast.error('Bloqueado pelo navegador — permita pop-ups para gerar o relatório.'); return; }
+    w.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Controle de Caixa — '+esc(relRef)+'</title><style>'+css+'</style></head><body>'+paginas+'</body></html>');
+    w.document.close();
+    w.focus();
+    setTimeout(function(){ w.print(); }, 400);
+  }
+
   function gerarPDF() {
     var now = new Date();
     var dataHora = now.toLocaleDateString('pt-BR')+' às '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -2632,6 +2725,46 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
             setAberturas(novo); setAbModal(null);
             toast.success('💰 Abertura de '+abModal.setor+' definida: R$ '+fmt(val)+' em '+abModal.dataRef.split('-').reverse().join('/'));
           }},'Salvar')
+        )
+      )
+    ),
+    e(Modal,{open:!!devModal,onClose:function(){setDevModal(null);},title:'↩ Devoluções / depósitos — '+((devModal&&devModal.setor)||''),width:480},
+      devModal&&e('div',null,
+        e('p',{style:{fontSize:12,color:C.text2,marginBottom:12}},'Dinheiro devolvido à conta pelo setor. Abate o caixa como saída (não é RD).'),
+        (devolucoes||[]).filter(function(d){return d.setor===devModal.setor;}).length>0&&e('div',{style:{marginBottom:14}},
+          (devolucoes||[]).filter(function(d){return d.setor===devModal.setor;}).sort(function(a,b){return (b.data||'').localeCompare(a.data||'');}).map(function(d){
+            return e('div',{key:d.id,style:{display:'flex',alignItems:'center',gap:8,background:C.bg2,borderRadius:6,padding:'8px 12px',marginBottom:6}},
+              e('div',{style:{flex:1}},
+                e('div',{style:{fontSize:12,fontWeight:600}},'R$ '+fmt(d.valor)+' — '+(d.data?d.data.split('-').reverse().join('/'):'—')),
+                d.obs&&e('div',{style:{fontSize:10,color:C.text2}},d.obs)
+              ),
+              e('span',{title:'Excluir',style:{cursor:'pointer',color:C.red,fontSize:13},onClick:function(){
+                if(!window.confirm('Excluir esta devolução de R$ '+fmt(d.valor)+'?'))return;
+                setDevolucoes((devolucoes||[]).filter(function(x){return x.id!==d.id;}));
+                toast.success('Devolução excluída.');
+              }},'🗑')
+            );
+          })
+        ),
+        e('div',{style:{borderTop:'1px solid '+C.border,paddingTop:12}},
+          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            e(Fld,{label:'Data do depósito'},e('input',{type:'date',value:devModal.data,onChange:function(ev){var v=ev.target.value;setDevModal(function(p){return {...p,data:v};});},
+              style:{width:'100%',background:C.bg2,border:'1px solid '+C.borderHi,borderRadius:6,padding:'8px 12px',fontSize:12,color:C.text0,colorScheme:'dark'}})),
+            e(Fld,{label:'Valor (R$)'},e(TI,{value:devModal.valor,onChange:function(v){setDevModal(function(p){return {...p,valor:v};});},placeholder:'Ex: 20,00',mono:true}))
+          ),
+          e(Fld,{label:'Observação (opcional)'},e(TI,{value:devModal.obs,onChange:function(v){setDevModal(function(p){return {...p,obs:v};});},placeholder:'Ex: devolução de sobra do caixa'})),
+          e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}},
+            e(Btn,{onClick:function(){setDevModal(null);}},'Fechar'),
+            e(Btn,{variant:'primary',onClick:function(){
+              var val=parseFloat(String(devModal.valor).replace(/\./g,'').replace(',','.'))||0;
+              if(!devModal.data){toast.error('Informe a data do depósito.');return;}
+              if(val<=0){toast.error('Informe o valor.');return;}
+              var nova=(devolucoes||[]).concat([{id:'dev_'+Date.now(),setor:devModal.setor,data:devModal.data,valor:val,obs:devModal.obs||''}]);
+              setDevolucoes(nova);
+              setDevModal(function(p){return {...p,data:'',valor:'',obs:''};});
+              toast.success('↩ Devolução de R$ '+fmt(val)+' registrada.');
+            }},'Adicionar')
+          )
         )
       )
     ),
@@ -2735,6 +2868,19 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
             boxShadow:'0 2px 10px rgba(234,88,12,.3)'}},
           e('span',{style:{fontSize:16}},'📄'),
           e('span',null,'Gerar PDF')
+        ),
+        e('button',{
+          onClick:gerarControleCaixa,
+          className:'no-print',
+          style:{
+            display:'flex',alignItems:'center',gap:6,
+            background:'linear-gradient(135deg,#001a3a,#123a7c)',
+            border:'1px solid #3b82f6',color:'#bfdbfe',
+            padding:'7px 16px',borderRadius:8,cursor:'pointer',
+            fontSize:12,fontWeight:700,whiteSpace:'nowrap',
+            boxShadow:'0 2px 10px rgba(59,130,246,.3)'}},
+          e('span',{style:{fontSize:16}},'🧾'),
+          e('span',null,'Controle de Caixa')
         ),
         // Resumo do filtro ativo
         e('div',{style:{marginLeft:'auto',fontSize:11,color:C.text2,whiteSpace:'nowrap'}},
@@ -2906,6 +3052,8 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
                   a.setor,
                   user.hasGlobalAccess&&e('span',{title:'Definir saldo de abertura',onClick:function(){setAbModal({setor:a.setor,valor:String((a.abertura&&a.abertura.valor)||''),dataRef:(a.abertura&&a.abertura.dataRef)||''});},
                     style:{marginLeft:6,cursor:'pointer',fontSize:11,opacity:.7}},'✏️'),
+                  user.hasGlobalAccess&&e('span',{title:'Devoluções / depósitos à conta',onClick:function(){setDevModal({setor:a.setor,data:'',valor:'',obs:''});},
+                    style:{marginLeft:4,cursor:'pointer',fontSize:11,opacity:.7}},'↩'),
                   semAb&&e('div',{style:{fontSize:8,color:C.amber,marginTop:2}},'sem abertura definida')
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.text2}},'R$ '+fmt(a.limite)),
@@ -2913,7 +3061,8 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:'#06b6d4',fontWeight:500,background:'#06b6d408'}},'R$ '+fmt(a.entradas||0)),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:11,color:C.green,background:C.green+'06'}},
                   e('div',null,'R$ '+fmt(a.saidas||0)),
-                  a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' no período')
+                  a.qtdRDs>0&&e('div',{style:{fontSize:8,color:C.green,marginTop:1}},a.qtdRDs+' RD'+(a.qtdRDs>1?'s':'')+' no período'),
+                  a.qtdDev>0&&e('div',{style:{fontSize:8,color:C.amber,marginTop:1}},'inclui '+a.qtdDev+' devolução'+(a.qtdDev>1?'ões':''))
                 ),
                 e('td',{style:{padding:'10px 12px',textAlign:'right',fontFamily:C.mono,fontSize:13,fontWeight:700,color:isNeg?C.red:C.blue,background:C.blueBg}},
                   e('div',null,'R$ '+fmt(a.sldFinal||0)),
@@ -5667,7 +5816,7 @@ function TabEnvios({lanc,sMap,toast}) {
 }
 
 // ── ADMIN ──────────────────────────────────────────────────────────────────────
-function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompanies,currentUser,toast}) {
+function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompanies,currentUser,toast,cartoes,setCartoes}) {
   const [at,setAt] = useState('usuarios');
   const [addM,setAddM] = useState(false);
   const [editM,setEditM] = useState(null); // usuário sendo editado
@@ -5722,6 +5871,10 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
     const lim=parseFloat(d.limit)||3000;
     if(d.editing&&d.editing!==d.name){setSMap(p=>{const n={...p};delete n[d.editing];n[d.name]=ports;return n;});setSLim(p=>{const n={...p};delete n[d.editing];n[d.name]=lim;return n;});}
     else{setSMap(p=>({...p,[d.name]:ports}));setSLim(p=>({...p,[d.name]:lim}));}
+    var novoCart=Object.assign({},cartoes||{});
+    if(d.editing&&d.editing!==d.name) delete novoCart[d.editing];
+    if(String(d.cartao||'').trim()) novoCart[d.name]=String(d.cartao).trim(); else delete novoCart[d.name];
+    if(setCartoes) setCartoes(novoCart);
     toast.success(d.editing?'Setor atualizado!':'Setor criado!');setSectM(null);
   }
 
@@ -5834,10 +5987,11 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
               e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},
                 'Portadores: '+(portadores.join(', ')||'—')+
                 ' · Limite: R$ '+fmt(sLim[name]||0)+
-                (SECTOR_CONTA[name]?' · Conta: '+SECTOR_CONTA[name].conta:'')
+                (SECTOR_CONTA[name]?' · Conta: '+SECTOR_CONTA[name].conta:'')+
+                ((cartoes&&cartoes[name])?' · Cartão: '+cartoes[name]:'')
               )
             ),
-            e(Btn,{size:'sm',onClick:()=>setSectM({name,portadores:portadores.join(', '),limit:String(sLim[name]||3000),conta:(SECTOR_CONTA[name]||{}).conta||'',fornecedor:'',editing:name})},'✏️'),
+            e(Btn,{size:'sm',onClick:()=>setSectM({name,portadores:portadores.join(', '),limit:String(sLim[name]||3000),conta:(SECTOR_CONTA[name]||{}).conta||'',fornecedor:'',cartao:(cartoes&&cartoes[name])||'',editing:name})},'✏️'),
             e(Btn,{size:'sm',variant:'danger',onClick:()=>{setSMap(p=>{const n={...p};delete n[name];return n;});setSLim(p=>{const n={...p};delete n[name];return n;});toast.info('Setor removido.');}},'🗑')
           ))
         ),
@@ -5856,12 +6010,13 @@ function TabAdmin({users,setUsers,sMap,setSMap,sLim,setSLim,companies,setCompani
 }
 
 function SectForm({data,onSave,onCancel}) {
-  const [f,setF] = useState({name:data.name||'',portadores:data.portadores||'',limit:data.limit||'3000',conta:data.conta||'',fornecedor:data.fornecedor||'',editing:data.editing});
+  const [f,setF] = useState({name:data.name||'',portadores:data.portadores||'',limit:data.limit||'3000',conta:data.conta||'',fornecedor:data.fornecedor||'',cartao:data.cartao||'',editing:data.editing});
   return e('div',{style:{display:'flex',flexDirection:'column',gap:14}},
     e(Fld,{label:'Nome do setor *'},e(TI,{value:f.name,onChange:v=>setF(p=>({...p,name:v})),placeholder:'Ex: TI / SUPORTE'})),
     e(Fld,{label:'Portadores (separados por vírgula)'},e(TI,{value:f.portadores,onChange:v=>setF(p=>({...p,portadores:v})),placeholder:'Ex: João Silva, Maria Souza'})),
     e(Fld,{label:'Limite mensal (R$)'},e(TI,{value:f.limit,onChange:v=>setF(p=>({...p,limit:v})),type:'number',placeholder:'3000',mono:true})),
     e(Fld,{label:'Conta bancária Banestes'},e(TI,{value:f.conta,onChange:v=>setF(p=>({...p,conta:v})),placeholder:'Ex: 38497269',mono:true})),
+    e(Fld,{label:'Nº do cartão físico'},e(TI,{value:f.cartao,onChange:v=>setF(p=>({...p,cartao:v})),placeholder:'Ex: 4450.4000.0128.6359',mono:true})),
     e(Fld,{label:'Cód. Fornecedor TOTVS'},e(TI,{value:f.fornecedor,onChange:v=>setF(p=>({...p,fornecedor:v})),placeholder:'Ex: 92.130',mono:true})),
     e('div',{style:{display:'flex',justifyContent:'flex-end',gap:10,marginTop:6}},
       e(Btn,{onClick:onCancel},'Cancelar'),
@@ -7117,6 +7272,24 @@ function App() {
     try { localStorage.setItem('gz_aberturas_caixa', JSON.stringify(novo)); } catch(e){}
     if(window._db) window._db.collection('config').doc('aberturas_caixa').set({map:novo,_ts:Date.now()}).catch(function(){});
   }
+  // Devoluções/Depósitos à conta: abatem o caixa como saída (não são RDs)
+  const [devolucoes,setDevolucoes] = useState(function(){
+    try { return JSON.parse(localStorage.getItem('gz_devolucoes')||'[]'); } catch(e){ return []; }
+  });
+  function salvarDevolucoes(nova){
+    setDevolucoes(nova);
+    try { localStorage.setItem('gz_devolucoes', JSON.stringify(nova)); } catch(e){}
+    if(window._db) window._db.collection('config').doc('devolucoes_caixa').set({list:nova,_ts:Date.now()}).catch(function(){});
+  }
+  // Nº do cartão físico por setor (aparece no Controle de Caixa)
+  const [cartoes,setCartoes] = useState(function(){
+    try { return JSON.parse(localStorage.getItem('gz_cartoes_caixa')||'{}'); } catch(e){ return {}; }
+  });
+  function salvarCartoes(novo){
+    setCartoes(novo);
+    try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(novo)); } catch(e){}
+    if(window._db) window._db.collection('config').doc('cartoes_caixa').set({map:novo,_ts:Date.now()}).catch(function(){});
+  }
 
   // ── Firebase: inicializar e escutar dados em tempo real ──────────────────
   useEffect(function(){
@@ -7175,6 +7348,26 @@ function App() {
           try { localStorage.setItem('gz_aberturas_caixa', JSON.stringify(d.map)); } catch(e){}
         }
       }, function(e){ console.error('Aberturas listener:', e); });
+
+    // Escutar devoluções/depósitos (config global)
+    var unsubDev = _db.collection('config').doc('devolucoes_caixa')
+      .onSnapshot(function(doc){
+        var d = doc && doc.data();
+        if(d && d.list){
+          setDevolucoes(d.list);
+          try { localStorage.setItem('gz_devolucoes', JSON.stringify(d.list)); } catch(e){}
+        }
+      }, function(e){ console.error('Devoluções listener:', e); });
+
+    // Escutar cartões físicos (config global)
+    var unsubCart = _db.collection('config').doc('cartoes_caixa')
+      .onSnapshot(function(doc){
+        var d = doc && doc.data();
+        if(d && d.map){
+          setCartoes(d.map);
+          try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(d.map)); } catch(e){}
+        }
+      }, function(e){ console.error('Cartões listener:', e); });
 
     // Escutar usuários
     var unsubUsers = _db.collection('users')
@@ -7328,7 +7521,7 @@ function App() {
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,setLanc,sMap,toast,setTab}),
         tab==='fila_rds'&&e(TabFilaRDs,{user,rds,setRds,lanc,sMap,toast}),
-        tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast,rds:rds,aberturas:aberturasCaixa,setAberturas:salvarAberturasCaixa}),
+        tab==='dashboard'&&e(TabDashboard,{lanc,setLanc,aportes,user,sMap,toast,rds:rds,aberturas:aberturasCaixa,setAberturas:salvarAberturasCaixa,devolucoes:devolucoes,setDevolucoes:salvarDevolucoes,cartoes:cartoes}),
         tab==='inbox'&&e(TabInbox,{queue,setQueue,user,sMap,companies:comp,onAdd:addL,toast,isMobile:isMobile}),
         tab==='database'&&e(TabDatabase,{lanc,setLanc,user,sMap,toast}),
         tab==='aportes'&&e(TabAportes,{lanc,aportes,rds,user,sMap,sLim,onClosePeriod:function(){
@@ -7365,7 +7558,7 @@ function App() {
           setRds([]);
           toast.success('✅ Período encerrado! D26 calculado automaticamente para todos os setores.');
         }}),
-        tab==='admin'&&e(TabAdmin,{users,setUsers,sMap,setSMap,sLim,setSLim,companies:comp,setCompanies:setComp,currentUser:user,toast}),
+        tab==='admin'&&e(TabAdmin,{users,setUsers,sMap,setSMap,sLim,setSLim,companies:comp,setCompanies:setComp,currentUser:user,toast,cartoes:cartoes,setCartoes:salvarCartoes}),
       )
     )
   );
