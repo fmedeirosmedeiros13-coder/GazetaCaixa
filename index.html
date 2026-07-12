@@ -407,7 +407,7 @@ const SECTOR_MAPPING = {
   'FINANCEIRO':                      ['Andressa'],
   'SUPRIMENTOS':                     ['Zé Lopes'],
   'JURÍDICO':                        ['Pablyto'],
-  'ENGENHARIA':                      ['Vinícius'],
+  'ENGENHARIA':                      ['Vinícius','Dienerson'],
   'ENTRETENIMENTO':                  ['Lethícia'],
   'GERÊNCIA DE RÁDIOS':              ['Thiago Silvares'],
   'MARKETING':                       ['Carla Sobreira'],
@@ -421,6 +421,23 @@ const SECTOR_MAPPING = {
   'RD CIDADÃ':                       ['Maria Helena'],
   'RD NOROESTE':                     ['Maria Helena'],
   'RD NOVA GERAÇÃO':                 ['Maria Helena'],
+};
+
+// Cartões físicos (débito Banestes) por setor — fonte: Rel cartões Banestes
+// Formato: 'Portador: número' — múltiplos separados por '; ' (ex.: Engenharia, 1 conta / 2 usuários)
+var DEFAULT_CARTOES = {
+  'FINANCEIRO':             'Andressa: 4450.4000.0157.2725',
+  'SUPRIMENTOS':            'Zé Lopes: 4450.4000.0128.6320',
+  'JURÍDICO':               'Pablyto: 4450.4000.0128.6367',
+  'ENGENHARIA':             'Vinícius: 4450.4000.0161.2190; Dienerson: 4450.4000.0167.1428',
+  'ENTRETENIMENTO':         'Lethícia: 4450.4000.0157.2857',
+  'GERÊNCIA DE RÁDIOS':     'Thiago Silvares: 4450.4000.0157.2790',
+  'MARKETING':              'Carla Sobreira: 4450.4000.0157.2832',
+  'OPERAÇÃO E PROGRAMAÇÃO': 'Carlos Gonzaga: 4450.4000.0157.2782',
+  'PROJETOS E EVENTOS':     'Bruno Araújo: 4450.4000.0157.2774',
+  'REDAÇÃO':                'Geraldo Nascimento: 4450.4000.0157.2865',
+  'TELEJORNALISMO':         'Bruno Dalvi: 4450.4000.0157.2766',
+  // TV SUL / TV NORTE / RD DIFUSORA / RD CIDADÃ / RD NOVA GERAÇÃO: números pendentes (solicitar ao Alexandre)
 };
 
 // Contas bancárias Banestes por setor
@@ -6016,7 +6033,7 @@ function SectForm({data,onSave,onCancel}) {
     e(Fld,{label:'Portadores (separados por vírgula)'},e(TI,{value:f.portadores,onChange:v=>setF(p=>({...p,portadores:v})),placeholder:'Ex: João Silva, Maria Souza'})),
     e(Fld,{label:'Limite mensal (R$)'},e(TI,{value:f.limit,onChange:v=>setF(p=>({...p,limit:v})),type:'number',placeholder:'3000',mono:true})),
     e(Fld,{label:'Conta bancária Banestes'},e(TI,{value:f.conta,onChange:v=>setF(p=>({...p,conta:v})),placeholder:'Ex: 38497269',mono:true})),
-    e(Fld,{label:'Nº do cartão físico'},e(TI,{value:f.cartao,onChange:v=>setF(p=>({...p,cartao:v})),placeholder:'Ex: 4450.4000.0128.6359',mono:true})),
+    e(Fld,{label:'Nº do cartão físico (múltiplos: Nome: nº; Nome: nº)'},e(TI,{value:f.cartao,onChange:v=>setF(p=>({...p,cartao:v})),placeholder:'Ex: Vinícius: 4450.4000.0161.2190; Dienerson: 4450.4000.0167.1428',mono:true})),
     e(Fld,{label:'Cód. Fornecedor TOTVS'},e(TI,{value:f.fornecedor,onChange:v=>setF(p=>({...p,fornecedor:v})),placeholder:'Ex: 92.130',mono:true})),
     e('div',{style:{display:'flex',justifyContent:'flex-end',gap:10,marginTop:6}},
       e(Btn,{onClick:onCancel},'Cancelar'),
@@ -7283,7 +7300,8 @@ function App() {
   }
   // Nº do cartão físico por setor (aparece no Controle de Caixa)
   const [cartoes,setCartoes] = useState(function(){
-    try { return JSON.parse(localStorage.getItem('gz_cartoes_caixa')||'{}'); } catch(e){ return {}; }
+    var ls={}; try { ls=JSON.parse(localStorage.getItem('gz_cartoes_caixa')||'{}'); } catch(e){}
+    return Object.assign({}, (typeof DEFAULT_CARTOES!=='undefined'?DEFAULT_CARTOES:{}), ls);
   });
   function salvarCartoes(novo){
     setCartoes(novo);
@@ -7364,8 +7382,9 @@ function App() {
       .onSnapshot(function(doc){
         var d = doc && doc.data();
         if(d && d.map){
-          setCartoes(d.map);
-          try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(d.map)); } catch(e){}
+          var mesclado = Object.assign({}, (typeof DEFAULT_CARTOES!=='undefined'?DEFAULT_CARTOES:{}), d.map);
+          setCartoes(mesclado);
+          try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(mesclado)); } catch(e){}
         }
       }, function(e){ console.error('Cartões listener:', e); });
 
