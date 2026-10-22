@@ -2550,7 +2550,7 @@ function DocThumb(props){
 // ── Novo documento fiscal (Prestação de contas): escaneia, IA lê, usuário confere e salva ──
 function DocNovoModal(props){
   var setores=props.setores||[], user=props.user;
-  var st=useState({img:null,mime:'',lendo:false,valor:'',data:'',local:'',nf:'',cnpj:'',setor:props.setorPadrao||setores[0]||''});
+  var st=useState({img:null,mime:'',lendo:false,valor:'',data:'',local:'',nf:'',cnpj:'',setor:props.setorPadrao||setores[0]||'',funcionario:user.name||'',conta_contabil:'',num_ordem:'',num_item:'',num_ems:'',num_sgp:''});
   var f=st[0], setF=st[1];
   var fileRef=useRef();
   function upd(k,v){setF(function(p){var n=Object.assign({},p);n[k]=v;return n;});}
@@ -2584,10 +2584,13 @@ function DocNovoModal(props){
     var v=parseFloat(String(f.valor).replace(/\./g,'').replace(',','.'))||0;
     if(v<=0){props.toast.error('Informe o valor do documento.');return;}
     if(!f.setor){props.toast.error('Selecione o setor.');return;}
-    var dt=f.data||isoToBR(todayISO());
+    var dt=isoToBR(todayISO());
+    var md=String(f.data||'').trim().match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})/);
+    if(md){ var yy=+md[3]; if(yy<100) yy+=2000; dt=('0'+md[1]).slice(-2)+'/'+('0'+md[2]).slice(-2)+'/'+yy; }
+    else if(/^\d{4}-\d{2}-\d{2}/.test(String(f.data||''))) dt=isoToBR(String(f.data).substring(0,10));
     props.onSave({id:uid(),origem:'doc',tipo:'SAÍDA',setor:f.setor,portador:user.name,operador_nome:user.name,
       data:dt,data_nf:dt,valor:v,local:f.local||'DOCUMENTO FISCAL',num_nf:f.nf||'',cnpj_fornec:f.cnpj||'',
-      empresa:'TV GAZETA',cod_fornec:'',centro_custo:'',conta_contabil:'',id_datasul:'',
+      empresa:'TV GAZETA',cod_fornec:'',centro_custo:'',id_datasul:'',funcionario:f.funcionario||'',conta_contabil:f.conta_contabil||'',num_ordem:f.num_ordem||'',num_item:f.num_item||'',num_ems:f.num_ems||'',num_sgp:f.num_sgp||'',
       documento_fiscal_url:f.img||null,auditStatus:'aguardando',iaStatus:'AMARELO'});
     props.onClose();
   }
@@ -2616,6 +2619,17 @@ function DocNovoModal(props){
       e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
         e(Fld,{label:'Nº da nota'},e(TI,{value:f.nf,onChange:function(v){upd('nf',v);},mono:true})),
         e(Fld,{label:'CNPJ'},e(TI,{value:f.cnpj,onChange:function(v){upd('cnpj',v);},mono:true}))
+      ),
+      e('div',{style:{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em',margin:'10px 0 4px',borderTop:'1px solid '+C.border,paddingTop:10}},'Dados TOTVS'),
+      e(Fld,{label:'Funcionário (quem usou)'},e(TI,{value:f.funcionario,onChange:function(v){upd('funcionario',v);}})),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+        e(Fld,{label:'Conta contábil'},e(TI,{value:f.conta_contabil,onChange:function(v){upd('conta_contabil',v);},mono:true,placeholder:'Ex: 311.200'})),
+        e(Fld,{label:'Nº da ordem'},e(TI,{value:f.num_ordem,onChange:function(v){upd('num_ordem',v);},mono:true}))
+      ),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}},
+        e(Fld,{label:'Nº item'},e(TI,{value:f.num_item,onChange:function(v){upd('num_item',v);},mono:true})),
+        e(Fld,{label:'Nº E.M.S'},e(TI,{value:f.num_ems,onChange:function(v){upd('num_ems',v);},mono:true})),
+        e(Fld,{label:'Nº SGP'},e(TI,{value:f.num_sgp,onChange:function(v){upd('num_sgp',v);},mono:true}))
       ),
       e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:14}},
         e(Btn,{onClick:props.onClose},'Cancelar'),
@@ -2714,8 +2728,12 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
   function parseAny(d){
     if(!d) return null;
     if(d instanceof Date) return d;
-    if(/^\d{4}-\d{2}-\d{2}/.test(d)) return new Date(d.substring(0,10)+'T00:00:00');
-    return parseBR(d);
+    var t=String(d).trim();
+    if(/^\d{4}-\d{2}-\d{2}/.test(t)) return new Date(t.substring(0,10)+'T00:00:00');
+    var m=t.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})/);
+    if(!m) return null;
+    var y=+m[3]; if(y<100) y+=2000;
+    return new Date(y,+m[2]-1,+m[1]);
   }
   const rangeAtual = useMemo(()=>{
     if(fPeriodo==='personalizado'){
@@ -3392,7 +3410,16 @@ function TabDashboard({lanc,setLanc,aportes,user,sMap,toast,rds,aberturas,setAbe
                       e(TD,{bold:true,style:{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},d.local||'—'),
                       e(TD,{mono:true},d.num_nf||'—'),
                       e(TD,null,e('span',{style:{background:C.bg3,padding:'2px 6px',borderRadius:4,fontSize:10}},String(d.setor||'').substring(0,14))),
-                      e(TD,{right:true,mono:true,bold:true,style:{color:C.red}},'R$ '+fmt(d.valor)),
+                      e(TD,{right:true,mono:true,bold:true,style:{color:C.red}},
+                        e('div',null,'R$ '+fmt(d.valor)),
+                        (function(){
+                          var kAb=(typeof poolKeyOf==='function'&&poolKeyOf(d.setor))||d.setor;
+                          var ab=aberturas&&aberturas[kAb]; var dd=parseAny(d.data_nf||d.data);
+                          if(!dd||isNaN(dd)) return e('div',{style:{fontSize:8,color:C.amber,fontWeight:400}},'⚠ data inválida — fora das saídas');
+                          if(ab&&ab.dataRef&&dd<new Date(ab.dataRef+'T00:00:00')) return e('div',{style:{fontSize:8,color:C.amber,fontWeight:400}},'⚠ antes do saldo inicial ('+ab.dataRef.split('-').reverse().join('/')+') — fora das saídas');
+                          return null;
+                        })()
+                      ),
                       e(TD,null,e('span',{style:{fontSize:10,color:noRD?C.green:C.text2}},noRD?('RD-'+(noRD.numero||'')):'—')),
                       e('td',{style:{padding:'9px 14px'}},!noRD&&e('span',{title:'Excluir documento',onClick:function(){removerDoc(d);},style:{cursor:'pointer',color:C.red,fontSize:13}},'🗑'))
                     );
@@ -4917,7 +4944,7 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
   // ── DETALHE DO RD ──
   if(etapa&&etapa.id) {
     var rd=etapa;
-    var rdLanc=lanc.filter(function(l){return rd.lancamentos.includes(l.id);});
+    var rdLanc=lanc.filter(function(l){return (rd.lancamentos||[]).includes(l.id);});
     var temReembolso=rdLanc.some(function(l){return l.empresa&&l.empresa!=='TV GAZETA';});
     // Contar lançamentos com TOTVS incompleto
     var lancsTotvsPendente = rdLanc.filter(function(l){return !temTOTVS(l);}).length;
@@ -5007,7 +5034,7 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
                           if(!window.confirm('Remover este lançamento do RD?\n\nO comprovante volta para a lista de lançamentos disponíveis.')) return;
                           setRds(function(p){return p.map(function(r){
                             if(r.id!==rd.id) return r;
-                            return Object.assign({},r,{lancamentos:r.lancamentos.filter(function(x){return x!==l.id;})});
+                            return Object.assign({},r,{lancamentos:(r.lancamentos||[]).filter(function(x){return x!==l.id;})});
                           });});
                           toast.info('Lançamento removido do RD.');
                         },
@@ -5093,7 +5120,7 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
   // ── FORMULÁRIO NOVO RD ──
   if(etapa==='novo'&&novoRD) {
     var lancDisp = lanc.filter(function(l){
-      return isDocFiscal(l)&&(!meuSetor||l.setor===meuSetor)&&!rds.some(function(r){return r.lancamentos.includes(l.id)&&r.id!==novoRD.id;});
+      return isDocFiscal(l)&&(!meuSetor||l.setor===meuSetor)&&!rds.some(function(r){return (r.lancamentos||[]).includes(l.id)&&r.id!==novoRD.id;});
     });
     var totalSel = lancSel.reduce(function(s,id){var l=lanc.find(function(x){return x.id===id;});return s+(l?l.valor:0);},0);
     var temReemb = lancSel.some(function(id){var l=lanc.find(function(x){return x.id===id;});return l&&l.empresa&&l.empresa!=='TV GAZETA';});
@@ -5287,7 +5314,7 @@ function TabMeusRDs({user,rds,setRds,lanc,setLanc,sMap,toast,setTab}) {
             e('div',{style:{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.blueHi,minWidth:54}},'RD-'+rd.numero),
             e('div',{style:{flex:1,minWidth:0}},
               e('div',{style:{fontSize:12,fontWeight:500,color:C.text0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},rd.gerencia||rd.setor),
-              e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},'CC '+rd.centro_custo+' · '+rd.lancamentos.length+' lançamentos · '+rd.data_emissao)
+              e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},'CC '+rd.centro_custo+' · '+(rd.lancamentos||[]).length+' lançamentos · '+rd.data_emissao)
             ),
             rd.status===RD_STATUS.DEVOLVIDO&&e('span',{style:{fontSize:10,color:C.red}},rd.obs_devolucao?'↩ '+rd.obs_devolucao.substring(0,30)+'...':'↩ Devolvido'),
             e(Badge,{color:statusCor[rd.status]||'gray'},statusLabel[rd.status]||rd.status),
@@ -5340,7 +5367,7 @@ function TabFilaRDs({user,rds,setRds,lanc,sMap,toast}) {
 
   if(detalhe) {
     var rd=detalhe;
-    var rdLanc=lanc.filter(function(l){return rd.lancamentos.includes(l.id);});
+    var rdLanc=lanc.filter(function(l){return (rd.lancamentos||[]).includes(l.id);});
     var temReemb=rdLanc.some(function(l){return l.empresa&&l.empresa!=='TV GAZETA';});
     var temMesAnt=rdLanc.some(function(l){return l.data_nf&&l.data_nf.substring(3)!==l.data.substring(3);});
 
@@ -5455,7 +5482,7 @@ function TabFilaRDs({user,rds,setRds,lanc,sMap,toast}) {
             e('div',{style:{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.blueHi,minWidth:54}},'RD-'+rd.numero),
             e('div',{style:{flex:1,minWidth:0}},
               e('div',{style:{fontSize:12,fontWeight:500,color:C.text0}},rd.gerencia||rd.setor+' — '+rd.portador),
-              e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},rd.empresa+' · CC '+rd.centro_custo+' · '+rd.lancamentos.length+' lançamentos · '+rd.data_emissao)
+              e('div',{style:{fontSize:11,color:C.text2,marginTop:2}},rd.empresa+' · CC '+rd.centro_custo+' · '+(rd.lancamentos||[]).length+' lançamentos · '+rd.data_emissao)
             ),
             rdBadge(rd.status),
             e('div',{style:{fontFamily:C.mono,fontSize:13,fontWeight:600,color:C.text0,minWidth:76,textAlign:'right'}},'R$ '+fmt(rd.total)),
@@ -6988,11 +7015,10 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
     // R8: Verificar duplicata por hash (localStorage + Firebase)
     var hash = hashExtrato(extratoRaw);
     function bloqueado(msg){
-      // Administrador pode reprocessar: linhas existentes são ATUALIZADAS (ex.: setor corrigido), nada é duplicado
-      if(user.hasGlobalAccess && window.confirm(msg+'\n\nDeseja REPROCESSAR este extrato?\nAs linhas já importadas serão atualizadas (setor/portador) sem duplicar valores.')){
-        setReimport(true); _processarExtrato(hash); return;
-      }
-      toast.error('⛔ '+msg+' Reimportação bloqueada (R8).');
+      // R8 sem perda de dados: extrato já registrado é reprocessado — só entram as linhas que NÃO estão no sistema
+      // (cada linha tem identificação fixa), e as existentes têm setor/portador atualizados. Nunca duplica valores.
+      toast.info('ℹ '+msg+' Serão incluídas apenas as linhas que ainda não estão no sistema.');
+      setReimport(true); _processarExtrato(hash);
     }
     setReimport(false);
     if(extratoJaImportado(hash)){ bloqueado('Este extrato já foi importado anteriormente.'); return; }
@@ -7078,7 +7104,7 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
       novos.forEach(function(l){ salvarLancamento(Object.assign({},l,{extrato_hash:hashAtual,_ts:Date.now()})); });
       setTimeout(function(){
         toast.success(reimport
-          ? '🔄 Extrato reprocessado: '+atualizadas+' linha(s) corrigida(s), '+novos.length+' nova(s).'
+          ? ((atualizadas+novos.length)===0 ? '✓ Nada a incluir: todas as linhas deste extrato já estão no sistema.' : '🔄 Extrato reprocessado: '+novos.length+' linha(s) incluída(s), '+atualizadas+' corrigida(s).')
           : '✅ Extrato importado e bloqueado contra reimportação!');
       },0);
       return lista.concat(novos.map(function(l){return Object.assign({},l,{extrato_hash:hashAtual});}));
@@ -7562,6 +7588,93 @@ function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSa
     )
   );
 }
+// ── Painel admin → Dados locais: backup, restauração e limpeza ──
+function DadosLocais(p){
+  var C2=C;
+  var reg=[]; try{ reg=JSON.parse(localStorage.getItem(EXTRATOS_IMPORTADOS_KEY)||'[]'); }catch(e){}
+  var rdsVazios=(p.rds||[]).filter(function(r){return r.status===RD_STATUS.RASCUNHO&&(r.lancamentos||[]).length===0;});
+  var docsOrfaos=0; var ids={}; (p.lanc||[]).forEach(function(l){ids[l.id]=1;});
+  (p.rds||[]).forEach(function(r){(r.lancamentos||[]).forEach(function(id){ if(!ids[id]) docsOrfaos++; });});
+  var ultErro=null; try{ ultErro=JSON.parse(localStorage.getItem('gz_ultimo_erro')||'null'); }catch(e){}
+  var fileRef=useRef();
+  function exportar(){
+    var dados={versao:'gazetacaixa-backup-1',gerado:new Date().toISOString(),lanc:p.lanc,rds:p.rds,users:p.users,sMap:p.sMap,sLim:p.sLim,
+      aberturas:p.aberturas,devolucoes:p.devolucoes,cartoes:p.cartoes,extratos:reg};
+    var blob=new Blob([JSON.stringify(dados)],{type:'application/json'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='backup_gazetacaixa_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    p.toast.success('💾 Backup exportado.');
+  }
+  function importar(ev){
+    var file=ev.target.files&&ev.target.files[0]; if(!file)return;
+    var r=new FileReader();
+    r.onload=function(){
+      try{
+        var d=JSON.parse(r.result);
+        if(d.versao!=='gazetacaixa-backup-1') throw new Error('arquivo não é um backup do GazetaCaixa');
+        if(!window.confirm('Restaurar o backup de '+new Date(d.gerado).toLocaleString('pt-BR')+'?\nOs dados do backup serão somados aos atuais (nada é apagado).'))return;
+        if(d.lanc) p.setLanc(function(x){return mesclarPorChave(x,d.lanc,'id');});
+        if(d.rds) p.setRds(function(x){return mesclarPorChave(x,d.rds,'id');});
+        if(d.users) p.setUsers(function(x){return mesclarPorChave(x,d.users,'login');});
+        if(d.sMap) p.setSMap(function(x){return Object.assign({},x,d.sMap);});
+        if(d.sLim) p.setSLim(function(x){return Object.assign({},x,d.sLim);});
+        if(d.aberturas) p.setAberturas(Object.assign({},p.aberturas,d.aberturas));
+        if(d.devolucoes) p.setDevolucoes(mesclarPorChave(p.devolucoes,d.devolucoes,'id'));
+        if(d.cartoes) p.setCartoes(Object.assign({},p.cartoes,d.cartoes));
+        if(d.extratos){ var u={}; reg.concat(d.extratos).forEach(function(h){u[h]=1;}); localStorage.setItem(EXTRATOS_IMPORTADOS_KEY,JSON.stringify(Object.keys(u))); }
+        p.toast.success('✅ Backup restaurado.');
+      }catch(err){ p.toast.error('Não foi possível restaurar: '+err.message); }
+    };
+    r.readAsText(file); ev.target.value='';
+  }
+  var linha=function(t,v){return e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12,padding:'6px 0',borderBottom:'1px solid '+C2.border+'33'}},e('span',{style:{color:C2.text2}},t),e('b',null,v));};
+  return e(Card,{style:{marginTop:16}},
+    e(CardHdr,{title:'Dados locais deste computador',icon:'💾',sub:'Backup, restauração e limpeza — use enquanto o sistema roda fora da nuvem'}),
+    e('div',{style:{padding:'4px 20px 16px'}},
+      linha('Lançamentos (extrato + documentos)',String((p.lanc||[]).length)),
+      linha('RDs',String((p.rds||[]).length)),
+      linha('Extratos registrados como importados',String(reg.length)),
+      linha('RDs em rascunho vazios',String(rdsVazios.length)),
+      linha('Referências de RD a lançamentos inexistentes',String(docsOrfaos)),
+      ultErro&&e('div',{style:{marginTop:10,fontSize:11,color:C2.amber}},'Último erro registrado ('+ultErro.quando+'): '+ultErro.msg),
+      e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}},
+        e(Btn,{variant:'primary',onClick:exportar},'⬇ Exportar backup'),
+        e(Btn,{onClick:function(){fileRef.current&&fileRef.current.click();}},'⬆ Restaurar backup'),
+        e('input',{type:'file',ref:fileRef,accept:'.json,application/json',onChange:importar,style:{display:'none'}}),
+        e(Btn,{onClick:function(){
+          if(!window.confirm('Remover '+rdsVazios.length+' RD(s) em rascunho sem lançamentos e limpar referências a lançamentos inexistentes?'))return;
+          p.setRds(function(x){return x.filter(function(r){return !(r.status===RD_STATUS.RASCUNHO&&(r.lancamentos||[]).length===0);})
+            .map(function(r){var l2=(r.lancamentos||[]).filter(function(id){return ids[id];});return l2.length===(r.lancamentos||[]).length?r:Object.assign({},r,{lancamentos:l2});});});
+          p.toast.success('🧹 Limpeza concluída.');
+        }},'🧹 Limpar RDs vazios'),
+        e(Btn,{onClick:function(){
+          if(!window.confirm('Liberar o registro de '+reg.length+' extrato(s) importado(s)?\nNão apaga lançamentos; apenas permite importar de novo (linhas já existentes não duplicam).'))return;
+          localStorage.removeItem(EXTRATOS_IMPORTADOS_KEY); p.toast.success('Registro de extratos liberado.');
+        }},'🔓 Liberar extratos registrados'),
+        ultErro&&e(Btn,{onClick:function(){localStorage.removeItem('gz_ultimo_erro');p.toast.success('Registro de erro limpo.');}},'Limpar aviso de erro')
+      )
+    )
+  );
+}
+
+// ── Proteção contra falhas: um erro numa tela não fecha o sistema nem perde os dados em memória ──
+class GZErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state={erro:null}; }
+  static getDerivedStateFromError(err){ return {erro:err}; }
+  componentDidCatch(err,info){ try{ console.error('Falha na tela:',err,info); localStorage.setItem('gz_ultimo_erro',JSON.stringify({msg:String(err&&err.message||err),stack:String(err&&err.stack||'').substring(0,800),quando:new Date().toLocaleString('pt-BR')})); }catch(e){} }
+  render(){
+    if(!this.state.erro) return this.props.children;
+    var self=this;
+    return e('div',{style:{background:C.redBg,border:'1px solid '+C.red,borderRadius:10,padding:20,color:C.text0}},
+      e('div',{style:{fontSize:15,fontWeight:700,color:C.red,marginBottom:6}},'⚠ Ocorreu um erro nesta tela'),
+      e('div',{style:{fontSize:12,color:C.text1,marginBottom:10}},'Seus dados continuam salvos. Volte para a tela anterior e, se o erro se repetir, envie a mensagem abaixo para o suporte.'),
+      e('pre',{style:{fontSize:11,background:C.bg2,padding:10,borderRadius:6,whiteSpace:'pre-wrap',color:C.amber,maxHeight:160,overflow:'auto'}},String(this.state.erro&&this.state.erro.message||this.state.erro)),
+      e('button',{onClick:function(){self.setState({erro:null});},style:{marginTop:10,background:C.blue,border:0,color:'#fff',padding:'8px 16px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}},'Tentar novamente')
+    );
+  }
+}
+
 // ── Salvamento local automático (IndexedDB): protege contra queda de luz / desligamento ──
 // Fica gravado no computador e navegador em uso. Suporta documentos com imagem (sem o limite do localStorage).
 var GZ_IDB = { db:null, abrir:function(cb){
@@ -7644,9 +7757,18 @@ function App() {
   const localCarregado = useRef(false);
   const [salvoLocal,setSalvoLocal] = useState(null);
   useEffect(function(){
-    idbLer('snapshot', function(snap){
+    idbLer('snapshot', function(snapIdb){
+      // 2ª cópia (sem imagens) no localStorage — usada se o IndexedDB não estiver disponível
+      var snapLs=null; try{ snapLs=JSON.parse(localStorage.getItem('gz_snapshot')||'null'); }catch(e){}
+      var snap = snapIdb;
+      if(!snap || (snapLs && snapLs._ts>(snap._ts||0))) snap = snapLs;
       if(snap){
-        if(snap.lanc)  setLanc(function(p){return mesclarPorChave(p,snap.lanc,'id');});
+        if(snap.lanc){
+          // se veio da cópia leve, recupera as imagens que estiverem no IndexedDB
+          var imgs={}; ((snapIdb&&snapIdb.lanc)||[]).forEach(function(l){ if(l.documento_fiscal_url) imgs[l.id]=l.documento_fiscal_url; });
+          var lst=snap.lanc.map(function(l){ return (l._imgIdb&&imgs[l.id])?Object.assign({},l,{documento_fiscal_url:imgs[l.id]}):l; });
+          setLanc(function(p){return mesclarPorChave(p,lst,'id');});
+        }
         if(snap.rds)   setRds(function(p){return mesclarPorChave(p,snap.rds,'id');});
         if(snap.queue) setQueue(function(p){return mesclarPorChave(p,snap.queue,'id');});
         if(snap.users) setUsers(function(p){return mesclarPorChave(p,snap.users,'login');});
@@ -7663,8 +7785,16 @@ function App() {
     if(!localCarregado.current) return; // não sobrescreve antes de restaurar
     var t=setTimeout(function(){
       var ts=Date.now();
-      idbGravar('snapshot',{lanc:lanc,rds:rds,queue:queue,users:users,sMap:sMap,sLim:sLim,comp:comp,saldosBancarios:saldosBancarios,_ts:ts},
-        function(ok){ if(ok) setSalvoLocal(new Date(ts)); });
+      var snap={lanc:lanc,rds:rds,queue:queue,users:users,sMap:sMap,sLim:sLim,comp:comp,saldosBancarios:saldosBancarios,_ts:ts};
+      // cópia leve (sem fotos/PDFs) no localStorage, gravada na hora
+      var okLs=false;
+      try{
+        var leve=Object.assign({},snap,{lanc:lanc.map(function(l){return l.documento_fiscal_url?Object.assign({},l,{documento_fiscal_url:null,_imgIdb:true}):l;}),queue:[]});
+        localStorage.setItem('gz_snapshot',JSON.stringify(leve)); okLs=true;
+      }catch(e){}
+      idbGravar('snapshot',snap,function(ok){
+        if(ok||okLs) setSalvoLocal(new Date(ts)); else setSalvoLocal('erro');
+      });
     },400);
     return function(){clearTimeout(t);};
   },[lanc,rds,queue,users,sMap,sLim,comp,saldosBancarios]);
@@ -7889,7 +8019,9 @@ function App() {
             !isMobile&&e('h1',{style:{fontSize:20,fontWeight:500}},TITLES[tab]||tab),
             !isMobile&&e('p',{style:{fontSize:12,color:C.text2,marginTop:2}},'Gestão consolidada Rede Gazeta & Datasul 2026 — v8.0 · IA Gemini'),
             saved&&e('p',{style:{fontSize:10,color:C.green,marginTop:3}},'☁ '+saved)
-            ,salvoLocal&&e('p',{style:{fontSize:10,color:C.text2,marginTop:2}},'💾 Salvo neste computador às '+salvoLocal.toLocaleTimeString('pt-BR'))
+            ,salvoLocal&&(salvoLocal==='erro'
+              ? e('p',{style:{fontSize:11,color:C.red,marginTop:2,fontWeight:600}},'⚠ Não foi possível salvar neste computador — exporte um backup em Painel admin → Dados locais')
+              : e('p',{style:{fontSize:10,color:C.text2,marginTop:2}},'💾 Salvo neste computador às '+salvoLocal.toLocaleTimeString('pt-BR')))
             ,location.protocol==='file:'&&e('div',{style:{marginTop:8,background:C.redBg,border:'1px solid '+C.red,borderRadius:8,padding:'8px 12px',fontSize:12,color:C.red,fontWeight:600,maxWidth:720}},
               '⚠ Você abriu uma CÓPIA LOCAL do arquivo (file://). Aqui o login e o banco na nuvem não funcionam: o que for importado ou lançado fica só neste navegador e os outros usuários não veem. Use o endereço oficial: fmedeirosmedeiros13-coder.github.io/GazetaCaixa/')
           ),
@@ -7899,6 +8031,7 @@ function App() {
           )
         ),
         e(FechamentoBanner,{lanc:lanc,user:user,setTab:setTab}),
+        e(GZErrorBoundary,{key:tab},
         tab==='apresentacao'&&e(TabManual,{user:user, lanc:lanc}),
         tab==='lancamento'&&e(TabLancamento,{user,sMap,companies:comp,lanc,onAdd:addL,toast,isMobile:isMobile,onAddQueue:function(item){addQueue(item);setTab('inbox');toast.success('📸 Enviado para Caixa de entrada!');}}), 
         tab==='meus_rds'&&e(TabMeusRDs,{user,rds,setRds,lanc,setLanc,sMap,toast,setTab}),
@@ -7915,7 +8048,6 @@ function App() {
             }
           });
           setSaldosBancarios(novosSaldos);
-          setLanc([]); setRds([]);
           toast.success('✅ Período encerrado! D26 calculado automaticamente.');
         },onReset:()=>setConfReset(true),toast}),
         tab==='saldo'&&e(TabSaldoBancario,{lanc:lanc,aportes:aportes,sMap:sMap,sLim:sLim,user:user,toast:toast,saldos:saldosBancarios,setSaldos:setSaldosBancarios}),
@@ -7935,12 +8067,12 @@ function App() {
             }
           });
           setSaldosBancarios(novosSaldos);
-          // Limpar lançamentos e RDs do período encerrado
-          setLanc([]);
-          setRds([]);
+          // Histórico preservado: lançamentos e RDs NÃO são apagados (saldo encadeado depende deles)
           toast.success('✅ Período encerrado! D26 calculado automaticamente para todos os setores.');
         }}),
         tab==='admin'&&e(TabAdmin,{users,setUsers,sMap,setSMap,sLim,setSLim,companies:comp,setCompanies:setComp,currentUser:user,toast,cartoes:cartoes,setCartoes:salvarCartoes,aberturas:aberturasCaixa,setAberturas:salvarAberturasCaixa}),
+        tab==='admin'&&e(DadosLocais,{lanc,setLanc,rds,setRds,users,setUsers,sMap,setSMap,sLim,setSLim,toast,aberturas:aberturasCaixa,setAberturas:salvarAberturasCaixa,devolucoes:devolucoes,setDevolucoes:salvarDevolucoes,cartoes:cartoes,setCartoes:salvarCartoes})
+        )
       )
     )
   );
