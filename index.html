@@ -7562,6 +7562,39 @@ function TabSaldoBancario({lanc, aportes, sMap, sLim, user, toast, saldos, setSa
     )
   );
 }
+// ── Salvamento local automático (IndexedDB): protege contra queda de luz / desligamento ──
+// Fica gravado no computador e navegador em uso. Suporta documentos com imagem (sem o limite do localStorage).
+var GZ_IDB = { db:null, abrir:function(cb){
+  if(GZ_IDB.db){cb(GZ_IDB.db);return;}
+  try{
+    var req=indexedDB.open('gazetacaixa_local',1);
+    req.onupgradeneeded=function(){ req.result.createObjectStore('estado'); };
+    req.onsuccess=function(){ GZ_IDB.db=req.result; cb(GZ_IDB.db); };
+    req.onerror=function(){ cb(null); };
+  }catch(e){ cb(null); }
+}};
+function idbLer(chave, cb){
+  GZ_IDB.abrir(function(db){
+    if(!db){cb(null);return;}
+    try{ var r=db.transaction('estado','readonly').objectStore('estado').get(chave);
+      r.onsuccess=function(){cb(r.result||null);}; r.onerror=function(){cb(null);};
+    }catch(e){cb(null);}
+  });
+}
+function idbGravar(chave, valor, cb){
+  GZ_IDB.abrir(function(db){
+    if(!db){cb&&cb(false);return;}
+    try{ var tx=db.transaction('estado','readwrite'); tx.objectStore('estado').put(valor,chave);
+      tx.oncomplete=function(){cb&&cb(true);}; tx.onerror=function(){cb&&cb(false);};
+    }catch(e){cb&&cb(false);}
+  });
+}
+function mesclarPorChave(atual, salvo, chave){
+  var m={}; (salvo||[]).forEach(function(x){ if(x&&x[chave]!=null) m[x[chave]]=x; });
+  (atual||[]).forEach(function(x){ if(x&&x[chave]!=null) m[x[chave]]=x; }); // o que já está em tela (ex.: nuvem) prevalece
+  return Object.keys(m).map(function(k){return m[k];});
+}
+
 function App() {
   const {toasts,dismiss,toast} = useToast();
   const [user,setUser] = useState(null);
@@ -7606,6 +7639,35 @@ function App() {
     try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(novo)); } catch(e){}
     if(window._db) window._db.collection('config').doc('cartoes_caixa').set({map:novo,_ts:Date.now()}).catch(function(){});
   }
+
+  // ── Salvamento local automático: restaura ao abrir e grava a cada alteração ──
+  const localCarregado = useRef(false);
+  const [salvoLocal,setSalvoLocal] = useState(null);
+  useEffect(function(){
+    idbLer('snapshot', function(snap){
+      if(snap){
+        if(snap.lanc)  setLanc(function(p){return mesclarPorChave(p,snap.lanc,'id');});
+        if(snap.rds)   setRds(function(p){return mesclarPorChave(p,snap.rds,'id');});
+        if(snap.queue) setQueue(function(p){return mesclarPorChave(p,snap.queue,'id');});
+        if(snap.users) setUsers(function(p){return mesclarPorChave(p,snap.users,'login');});
+        if(snap.sMap)  setSMap(function(p){return Object.assign({},p,snap.sMap);});
+        if(snap.sLim)  setSLim(function(p){return Object.assign({},p,snap.sLim);});
+        if(snap.comp&&snap.comp.length) setComp(snap.comp);
+        if(snap.saldosBancarios) setSaldosBancarios(function(p){return Object.assign({},snap.saldosBancarios,p);});
+        if(snap._ts) setSalvoLocal(new Date(snap._ts));
+      }
+      localCarregado.current = true;
+    });
+  },[]);
+  useEffect(function(){
+    if(!localCarregado.current) return; // não sobrescreve antes de restaurar
+    var t=setTimeout(function(){
+      var ts=Date.now();
+      idbGravar('snapshot',{lanc:lanc,rds:rds,queue:queue,users:users,sMap:sMap,sLim:sLim,comp:comp,saldosBancarios:saldosBancarios,_ts:ts},
+        function(ok){ if(ok) setSalvoLocal(new Date(ts)); });
+    },400);
+    return function(){clearTimeout(t);};
+  },[lanc,rds,queue,users,sMap,sLim,comp,saldosBancarios]);
 
   // ── Firebase: inicializar e escutar dados em tempo real ──────────────────
   useEffect(function(){
@@ -7827,6 +7889,7 @@ function App() {
             !isMobile&&e('h1',{style:{fontSize:20,fontWeight:500}},TITLES[tab]||tab),
             !isMobile&&e('p',{style:{fontSize:12,color:C.text2,marginTop:2}},'Gestão consolidada Rede Gazeta & Datasul 2026 — v8.0 · IA Gemini'),
             saved&&e('p',{style:{fontSize:10,color:C.green,marginTop:3}},'☁ '+saved)
+            ,salvoLocal&&e('p',{style:{fontSize:10,color:C.text2,marginTop:2}},'💾 Salvo neste computador às '+salvoLocal.toLocaleTimeString('pt-BR'))
             ,location.protocol==='file:'&&e('div',{style:{marginTop:8,background:C.redBg,border:'1px solid '+C.red,borderRadius:8,padding:'8px 12px',fontSize:12,color:C.red,fontWeight:600,maxWidth:720}},
               '⚠ Você abriu uma CÓPIA LOCAL do arquivo (file://). Aqui o login e o banco na nuvem não funcionam: o que for importado ou lançado fica só neste navegador e os outros usuários não veem. Use o endereço oficial: fmedeirosmedeiros13-coder.github.io/GazetaCaixa/')
           ),
