@@ -751,7 +751,7 @@ function registrarExtrato(hash, info) {
 // Lê colunas: PROTOCOLO, NÚMERO DO CARTÃO, PORTADOR, CONTA CORRENTE,
 //             CONTA DESTINO, ESTABELECIMENTO, DESCRIÇÃO, VALOR
 function parseBanestsCSV(texto, sMap) {
-  var linhas = texto.trim().split(/\r?\n/);
+  var linhas = String(texto||'').trim().split(/\r?\n/);
 
   // Mapeamento conta corrente → setor
   var contaSetor = {}, contaSetores = {};
@@ -822,17 +822,21 @@ function parseBanestsCSV(texto, sMap) {
     });
     return (pts>0&&!empate)?melhor:'';
   }
+  var _fonte='';
   function resolverSetor(contaRaw, cartaoLinha, portadorLinha){
     var dig=soDig(cartaoLinha);
-    if(dig.length>=12&&cartaoSetor[dig]) return cartaoSetor[dig];
+    if(dig.length>=12&&cartaoSetor[dig]){ _fonte='cartao'; return cartaoSetor[dig]; }
     var ck=contaChave(contaRaw);
     if(ck){
+      _fonte='conta';
       var cands=contaSetores[ck];
       if(cands.length===1) return cands[0];
       return resolverPorNome(portadorLinha,cands)||setorNaConta(ck,cartaoLinha,portadorLinha);
     }
+    _fonte='nome';
     return resolverPorNome(portadorLinha,null);
   }
+  if(texto===null) return function(c,k,p){ var st=resolverSetor(c,k,p); return {setor:st,fonte:_fonte}; };
 
   // Mapeamento portador → setor (fallback)
   var portadorSetor = {};
@@ -7145,7 +7149,7 @@ function TabConciliacao({lanc, setLanc, user, sMap, toast}) {
       // Reprocessamento: corrige setor/portador das linhas que já existem (mantém status de auditoria)
       var lista = prev.map(function(l){
         var n = porId[l.id];
-        if(!reimport || !n || !isExtrato(l)) return l;
+        if(!n || !isExtrato(l)) return l;
         if(l.setor===n.setor && l.portador===n.portador) return l;
         atualizadas++;
         var upd = Object.assign({},l,{setor:n.setor,portador:n.portador,_ts:Date.now()});
@@ -7711,6 +7715,21 @@ function DadosLocais(p){
   );
 }
 
+// ── Reclassifica linhas de extrato já gravadas com a regra atual (cartão → conta → nome) ──
+// Cartão/conta corrigem sempre; nome só corrige linhas "NÃO IDENTIFICADO" (não desfaz acertos manuais).
+function reclassificarExtrato(lanc, sMap){
+  var R; try{ R=parseBanestsCSV(null, sMap); }catch(e){ return null; }
+  var mud=[];
+  var nova=lanc.map(function(l){
+    if(!isExtrato(l)) return l;
+    var r=R(l.conta_banestes||'', l.cartao||'', l.portador||'');
+    if(!r.setor||r.setor===l.setor) return l;
+    if(r.fonte==='nome' && l.setor!=='NÃO IDENTIFICADO') return l;
+    var n=Object.assign({},l,{setor:r.setor,_ts:Date.now()}); mud.push(n); return n;
+  });
+  return mud.length?{lista:nova,mudadas:mud}:null;
+}
+
 // ── Proteção contra falhas: um erro numa tela não fecha o sistema nem perde os dados em memória ──
 class GZErrorBoundary extends React.Component {
   constructor(p){ super(p); this.state={erro:null}; }
@@ -7805,6 +7824,15 @@ function App() {
     try { localStorage.setItem('gz_cartoes_caixa', JSON.stringify(novo)); } catch(e){}
     if(window._db) window._db.collection('config').doc('cartoes_caixa').set({map:novo,_ts:Date.now()}).catch(function(){});
   }
+
+  // Corrige automaticamente o setor de linhas de extrato importadas com regras antigas
+  useEffect(function(){
+    var r=reclassificarExtrato(lanc,sMap);
+    if(!r) return;
+    setLanc(r.lista);
+    r.mudadas.forEach(function(l){ try{ salvarLancamento(l); }catch(e){} });
+    console.log('Setores corrigidos em '+r.mudadas.length+' linha(s) do extrato');
+  },[lanc,sMap]);
 
   // ── Salvamento local automático: restaura ao abrir e grava a cada alteração ──
   const localCarregado = useRef(false);
@@ -8070,7 +8098,7 @@ function App() {
         e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:isMobile?8:22,flexWrap:'wrap',gap:12}},
           e('div',null,
             !isMobile&&e('h1',{style:{fontSize:20,fontWeight:500}},TITLES[tab]||tab),
-            !isMobile&&e('p',{style:{fontSize:12,color:C.text2,marginTop:2}},'Gestão consolidada Rede Gazeta & Datasul 2026 — v8.0 · IA Gemini'),
+            !isMobile&&e('p',{style:{fontSize:12,color:C.text2,marginTop:2}},'Gestão consolidada Rede Gazeta & Datasul 2026 — v8.0 · IA Gemini · atualização 30/10 (setores)'),
             saved&&e('p',{style:{fontSize:10,color:C.green,marginTop:3}},'☁ '+saved)
             ,salvoLocal&&(salvoLocal==='erro'
               ? e('p',{style:{fontSize:11,color:C.red,marginTop:2,fontWeight:600}},'⚠ Não foi possível salvar neste computador — exporte um backup em Painel admin → Dados locais')
