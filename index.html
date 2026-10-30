@@ -442,6 +442,22 @@ var DEFAULT_CARTOES = {
   // TV SUL / TV NORTE / RD DIFUSORA / RD CIDADÃ / RD NOVA GERAÇÃO: números pendentes (solicitar ao Alexandre)
 };
 
+// Nomes completos dos portadores como aparecem no extrato (fonte: Rel cartões Banestes)
+var PORTADOR_NOMES = {
+  'FINANCEIRO':             ['Andressa Wolkeres'],
+  'SUPRIMENTOS':            ['José Lopes dos Santos'],
+  'JURÍDICO':               ['Pablyto'],
+  'PRESIDÊNCIA':            ['Jocimar'],
+  'TELEJORNALISMO':         ['Bruno Dalvi Rampinelli'],
+  'PROJETOS E EVENTOS':     ['Bruno Araújo Izidoro Pereira'],
+  'OPERAÇÃO E PROGRAMAÇÃO': ['Carlos Gonzaga Sousa Filho'],
+  'GERÊNCIA DE RÁDIOS':     ['Tiago Silvares dos Santos'],
+  'ENGENHARIA':             ['Vinícius G. Pimentel','Dienerson Ferreira Lisboa Chaves'],
+  'MARKETING':              ['Carla Sobreira Gomes de Oliveira'],
+  'ENTRETENIMENTO':         ['Lethicia Ribeiro de Moraes'],
+  'REDAÇÃO':                ['Geraldo Nascimento Ramos'],
+};
+
 // Contas bancárias Banestes por setor
 var SECTOR_CONTA = {
   'FINANCEIRO':  {conta:'31679574', nome:'Banes-CX-TVG', pool:'POOL_FINANCEIRO'},
@@ -773,6 +789,51 @@ function parseBanestsCSV(texto, sMap) {
     return cands[0];
   }
 
+  // 1º cartão (identifica até dentro da conta compartilhada)
+  var cartaoSetor = {};
+  Object.keys(cartoesMap).forEach(function(st){
+    String(cartoesMap[st]||'').split(';').forEach(function(x){ var d=soDig(x.split(':').pop()); if(d.length>=12) cartaoSetor[d]=st; });
+  });
+  // 2º conta corrente, aceitando pontos, traço, zeros à esquerda e dígito verificador
+  function contaChave(raw){
+    var d=soDig(raw); if(!d) return '';
+    var opc=[d, d.replace(/^0+/,''), d.slice(0,-1), d.replace(/^0+/,'').slice(0,-1)];
+    for(var i=0;i<opc.length;i++){ if(opc[i]&&contaSetores[opc[i]]) return opc[i]; }
+    var ks=Object.keys(contaSetores);
+    for(var j=0;j<ks.length;j++){ if(d.indexOf(ks[j])>-1) return ks[j]; }
+    return '';
+  }
+  // 3º nome do portador: pontua sobrenomes em comum; empate entre setores diferentes = não identificado
+  var IGN={'DOS':1,'DAS':1,'DE':1,'DA':1,'DO':1,'E':1};
+  function resolverPorNome(portadorLinha, cands){
+    var toks=normN(portadorLinha).split(' ').filter(function(t){return t.length>2&&!IGN[t];});
+    if(!toks.length) return '';
+    var melhor='', pts=0, empate=false;
+    (cands||Object.keys(sMap)).forEach(function(st){
+      var nomes=(sMap[st]||[]).concat((typeof PORTADOR_NOMES!=='undefined'&&PORTADOR_NOMES[st])||[]);
+      var best=0;
+      nomes.forEach(function(n){
+        var nt=normN(n).split(' ').filter(function(t){return t.length>2&&!IGN[t];});
+        var c=nt.filter(function(t){return toks.indexOf(t)>-1;}).length;
+        if(c>best) best=c;
+      });
+      if(best>pts){pts=best;melhor=st;empate=false;}
+      else if(best===pts&&best>0&&st!==melhor){empate=true;}
+    });
+    return (pts>0&&!empate)?melhor:'';
+  }
+  function resolverSetor(contaRaw, cartaoLinha, portadorLinha){
+    var dig=soDig(cartaoLinha);
+    if(dig.length>=12&&cartaoSetor[dig]) return cartaoSetor[dig];
+    var ck=contaChave(contaRaw);
+    if(ck){
+      var cands=contaSetores[ck];
+      if(cands.length===1) return cands[0];
+      return resolverPorNome(portadorLinha,cands)||setorNaConta(ck,cartaoLinha,portadorLinha);
+    }
+    return resolverPorNome(portadorLinha,null);
+  }
+
   // Mapeamento portador → setor (fallback)
   var portadorSetor = {};
   Object.entries(sMap).forEach(function(e){
@@ -931,7 +992,7 @@ function parseBanestsCSV(texto, sMap) {
       for(var ci2=0; ci2<cols.length; ci2++) {
         var c2=cols[ci2].trim();
         if(!data){var mD=c2.match(/(\d{2}\/\d{2}(?:\/\d{2,4})?)/);if(mD){data=mD[1];if(data.split('/').length===2)data+='/'+new Date().getFullYear();continue;}}
-        if(!conta){var cl=c2.replace(/[\.\s]/g,'');if(/^\d{7,10}$/.test(cl)&&contaSetor[cl]){conta=cl;continue;}}
+        if(!conta){var cl=c2.replace(/[\.\s\-]/g,'');if(/^\d{7,11}$/.test(cl)&&contaChave(cl)){conta=cl;continue;}}
       }
       estab    = (cols[cols.length-3]||'').trim();
       desc     = (cols[cols.length-2]||'').trim();
@@ -942,15 +1003,7 @@ function parseBanestsCSV(texto, sMap) {
     if(valor<=0 || valor>100000) continue;
 
     // Identificar setor: 1º conta corrente, 2º portador
-    var setor = contaSetor[conta] ? setorNaConta(conta, cartao, portador) : '';
-    if(!setor) {
-      var portUp = portador.toUpperCase().trim();
-      var portKeys = Object.keys(portadorSetor);
-      for(var pk=0; pk<portKeys.length; pk++) {
-        var pkUp=portKeys[pk];
-        if(portUp.indexOf(pkUp)>-1||pkUp.indexOf(portUp.split(' ')[0])>-1){setor=portadorSetor[pkUp];break;}
-      }
-    }
+    var setor = resolverSetor(conta, cartao, portador);
     if(!setor) setor='NÃO IDENTIFICADO';
 
     // Tipo
